@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scraping Tool</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8f9fa;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: white;
+            padding: 1rem 2rem;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 1.5rem;
+        }
+
+        .user-info {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+
+        .scrape-card {
+            background: white;
+            border-radius: 10px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .scrape-card h2 {
+            color: #333;
+            margin-bottom: 1.5rem;
+            font-size: 1.3rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e1e5e9;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .scrape-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .scrape-button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+        }
+
+        .scrape-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status-card {
+            background: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-top: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            display: none;
+        }
+
+        .status-card.active {
+            display: block;
+        }
+
+        .status-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 0.5rem;
+            background: #28a745;
+        }
+
+        .status-indicator.loading {
+            background: #ffc107;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+
+        .status-info {
+            flex: 1;
+        }
+
+        .status-info h3 {
+            color: #333;
+            font-size: 1.1rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .status-info p {
+            color: #666;
+            font-size: 0.9rem;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .results-section {
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .results-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .sheet-link {
+            background: #28a745;
+            color: white;
+            text-decoration: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            transition: background 0.3s ease;
+        }
+
+        .sheet-link:hover {
+            background: #218838;
+        }
+
+        .reset-button {
+            background: #6c757d;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 5px;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+
+        .logout-link {
+            color: #666;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+
+        .logout-link:hover {
+            color: #333;
+        }
+
+        .options-section {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin: 1.5rem 0;
+            border: 1px solid #e9ecef;
+        }
+
+        .options-section h3 {
+            color: #333;
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            font-weight: 400;
+        }
+
+        .checkbox-label input[type="checkbox"] {
+            margin-right: 0.5rem;
+            width: auto;
+        }
+
+        .checkbox-label span {
+            color: #555;
+        }
+
+        .statistics-section {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .statistics-section h4 {
+            color: #333;
+            margin-bottom: 1rem;
+            font-size: 1rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: #666;
+            font-weight: 500;
+        }
+
+        .stat-value {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .priority-a { color: #28a745; }
+    .priority-b { color: #ffc107; }
+    .priority-c { color: #fd7e14; }
+    .priority-d { color: #dc3545; }
+        .log-container {
+            background: #f8f9fa;
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1.5rem;
+            max-height: 400px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .log-container.active {
+            display: block;
+        }
+
+        .log-container h3 {
+            color: #333;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .log-content {
+            background: #000;
+            color: #0f0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            padding: 0.5rem;
+            border-radius: 4px;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .log-entry {
+            margin-bottom: 0.25rem;
+            line-height: 1.3;
+        }
+
+        .log-entry.error { color: #ff6b6b; }
+        .log-entry.warning { color: #ffd93d; }
+        .log-entry.info { color: #6bcf7f; }
+        .log-entry.debug { color: #a8a8a8; }
+        .departments-container {
+            border: 2px solid #e1e5e9;
+            border-radius: 5px;
+            padding: 1rem;
+            background: #f8f9fa;
+        }
+
+        .departments-header {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .dept-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .dept-button:hover {
+            background: #5a6fd8;
+        }
+
+        .departments-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 0.5rem;
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 0.5rem;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+
+        .dept-checkbox {
+            display: flex;
+            align-items: center;
+            padding: 0.25rem;
+            border-radius: 3px;
+            transition: background 0.2s ease;
+            cursor: pointer;
+        }
+
+        .dept-checkbox:hover {
+            background: #e9ecef;
+        }
+
+        .dept-checkbox input[type="checkbox"] {
+            margin-right: 0.5rem;
+            width: auto;
+        }
+
+        .dept-checkbox label {
+            margin: 0;
+            font-size: 0.85rem;
+            color: #555;
+            cursor: pointer;
+            font-weight: 400;
+        }
+
+        .selected-count {
+            background: #28a745;
+            color: white;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            margin-left: auto;
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <h1>Scraping Tool</h1>
+        <div class="user-info">
+            <span><%= user.email %></span>
+            <a href="/logout" class="logout-link">Logout</a>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="scrape-card">
+            <h2>Start Scraping</h2>
+            <form id="scrapeForm">
+                <div class="form-group">
+                    <label for="keyword">Keyword</label>
+                    <input 
+                        type="text" 
+                        id="keyword" 
+                        name="keyword" 
+                        required 
+                        placeholder="e.g., restaurant, plumber, dentist"
+                    >
+                </div>
+
+                <div class="form-group">
+                    <label for="source">Source</label>
+                    <select id="source" name="source" required>
+                        <option value="">Select a source</option>
+                        <option value="OpenStreetMap">OpenStreetMap</option>
+                        <option value="PagesJaunes">PagesJaunes</option>
+                        <option value="TEST_DATA">🧪 Test Data (Recommended)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="departments">Departments (Optional - Leave empty for all)</label>
+                    <div class="departments-container">
+                        <div class="departments-header">
+                            <button type="button" id="selectAllDepts" class="dept-button">Select All</button>
+                            <button type="button" id="deselectAllDepts" class="dept-button">Deselect All</button>
+                            <button type="button" id="selectMajorDepts" class="dept-button">Major Cities</button>
+                        </div>
+                        <div class="departments-grid" id="departmentsGrid">
+                            <!-- Departments will be populated by JavaScript -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="options-section">
+                    <h3>Processing Options</h3>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enableEnrichment" name="enableEnrichment" checked>
+                            <span>Enable data enrichment (website & social media)</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="enableN8nSending" name="enableN8nSending" checked>
+                            <span>Send to n8n webhook for Google Sheets storage</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="oneByOneProcessing" name="oneByOneProcessing" checked>
+                            <span>Process leads one by one (recommended for n8n)</span>
+                        </label>
+                    </div>
+                </div>
+
+                <button type="submit" class="scrape-button" id="scrapeButton">
+                    Start Scraping
+                </button>
+
+                <div class="log-container" id="logContainer">
+                    <h3>📋 Real-time Logs</h3>
+                    <div class="log-content" id="logContent"></div>
+                </div>
+        </div>
+
+        <div class="status-card" id="statusCard">
+            <div class="status-header">
+                <div class="status-indicator" id="statusIndicator"></div>
+                <div class="status-info">
+                    <h3 id="statusTitle">Ready to scrape</h3>
+                    <p id="statusMessage">Configure your scraping parameters above</p>
+                </div>
+            </div>
+
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+
+            <div class="results-section" id="resultsSection" style="display: none;">
+                <div class="results-info">
+                    <div>
+                        <strong>Leads Found:</strong> <span id="leadsCount">0</span>
+                    </div>
+                    <div>
+                        <a href="#" id="sheetLink" class="sheet-link" target="_blank">Open Google Sheet</a>
+                        <button id="resetButton" class="reset-button">New Scrape</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isScraping = false;
+        let logPollingInterval = null;
+        let lastLogTimestamp = null;
+
+        // Departments data
+        const DEPARTMENTS = {
+            '01': 'Ain', '02': 'Aisne', '03': 'Allier', '04': 'Alpes-de-Haute-Provence', '05': 'Hautes-Alpes',
+            '06': 'Alpes-Maritimes', '07': 'Ardèche', '08': 'Ardennes', '09': 'Ariège', '10': 'Aube',
+            '11': 'Aude', '12': 'Aveyron', '13': 'Bouches-du-Rhône', '14': 'Calvados', '15': 'Cantal',
+            '16': 'Charente', '17': 'Charente-Maritime', '18': 'Cher', '19': 'Corrèze', '2A': 'Corse-du-Sud',
+            '2B': 'Haute-Corse', '21': 'Côte-d\'Or', '22': 'Côtes-d\'Armor', '23': 'Creuse', '24': 'Dordogne',
+            '25': 'Doubs', '26': 'Drôme', '27': 'Eure', '28': 'Eure-et-Loir', '29': 'Finistère',
+            '30': 'Gard', '31': 'Haute-Garonne', '32': 'Gers', '33': 'Gironde', '34': 'Hérault',
+            '35': 'Ille-et-Vilaine', '36': 'Indre', '37': 'Indre-et-Loire', '38': 'Isère', '39': 'Jura',
+            '40': 'Landes', '41': 'Loir-et-Cher', '42': 'Loire', '43': 'Haute-Loire', '44': 'Loire-Atlantique',
+            '45': 'Loiret', '46': 'Lot', '47': 'Lot-et-Garonne', '48': 'Lozère', '49': 'Maine-et-Loire',
+            '50': 'Manche', '51': 'Marne', '52': 'Haute-Marne', '53': 'Mayenne', '54': 'Meurthe-et-Moselle',
+            '55': 'Meuse', '56': 'Morbihan', '57': 'Moselle', '58': 'Nièvre', '59': 'Nord',
+            '60': 'Oise', '61': 'Orne', '62': 'Pas-de-Calais', '63': 'Puy-de-Dôme', '64': 'Pyrénées-Atlantiques',
+            '65': 'Hautes-Pyrénées', '66': 'Pyrénées-Orientales', '67': 'Bas-Rhin', '68': 'Haut-Rhin', '69': 'Rhône',
+            '70': 'Haute-Saône', '71': 'Saône-et-Loire', '72': 'Sarthe', '73': 'Savoie', '74': 'Haute-Savoie',
+            '75': 'Paris', '76': 'Seine-Maritime', '77': 'Seine-et-Marne', '78': 'Yvelines', '79': 'Deux-Sèvres',
+            '80': 'Somme', '81': 'Tarn', '82': 'Tarn-et-Garonne', '83': 'Var', '84': 'Vaucluse', '85': 'Vendée',
+            '86': 'Vienne', '87': 'Haute-Vienne', '88': 'Vosges', '89': 'Yonne', '90': 'Territoire de Belfort',
+            '91': 'Essonne', '92': 'Hauts-de-Seine', '93': 'Seine-Saint-Denis', '94': 'Val-de-Marne', '95': 'Val-d\'Oise',
+            '971': 'Guadeloupe', '972': 'Martinique', '973': 'Guyane', '974': 'La Réunion', '976': 'Mayotte'
+        };
+
+        const MAJOR_DEPARTMENTS = ['75', '69', '13', '31', '06', '92', '93', '94', '33', '44', '59', '62'];
+
+        // DOM elements
+        const form = document.getElementById('scrapeForm');
+        const button = document.getElementById('scrapeButton');
+        const statusCard = document.getElementById('statusCard');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusTitle = document.getElementById('statusTitle');
+        const statusMessage = document.getElementById('statusMessage');
+        const progressFill = document.getElementById('progressFill');
+        const resultsSection = document.getElementById('resultsSection');
+        const leadsCount = document.getElementById('leadsCount');
+        const sheetLink = document.getElementById('sheetLink');
+        const resetButton = document.getElementById('resetButton');
+        const departmentsGrid = document.getElementById('departmentsGrid');
+        const selectAllBtn = document.getElementById('selectAllDepts');
+        const deselectAllBtn = document.getElementById('deselectAllDepts');
+        const selectMajorBtn = document.getElementById('selectMajorDepts');
+        const logContainer = document.getElementById('logContainer');
+        const logContent = document.getElementById('logContent');
+
+        // Initialize departments grid
+        function initializeDepartments() {
+            departmentsGrid.innerHTML = '';
+            
+            Object.entries(DEPARTMENTS).forEach(([code, name]) => {
+                const deptDiv = document.createElement('div');
+                deptDiv.className = 'dept-checkbox';
+                deptDiv.innerHTML = `
+                    <input type="checkbox" id="dept_${code}" name="departments" value="${code}">
+                    <label for="dept_${code}">${code} - ${name}</label>
+                `;
+                departmentsGrid.appendChild(deptDiv);
+            });
+
+            // Add event listeners
+            selectAllBtn.addEventListener('click', selectAllDepartments);
+            deselectAllBtn.addEventListener('click', deselectAllDepartments);
+            selectMajorBtn.addEventListener('click', selectMajorDepartments);
+
+            // Update count on change
+            departmentsGrid.addEventListener('change', updateSelectedCount);
+            updateSelectedCount();
+        }
+
+        function selectAllDepartments() {
+            const checkboxes = departmentsGrid.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = true);
+            updateSelectedCount();
+        }
+
+        function deselectAllDepartments() {
+            const checkboxes = departmentsGrid.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => cb.checked = false);
+            updateSelectedCount();
+        }
+
+        function selectMajorDepartments() {
+            const checkboxes = departmentsGrid.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.checked = MAJOR_DEPARTMENTS.includes(cb.value);
+            });
+            updateSelectedCount();
+        }
+
+        function updateSelectedCount() {
+            const checked = departmentsGrid.querySelectorAll('input[type="checkbox"]:checked');
+            const count = checked.length;
+            
+            // Update or create count display
+            let countDisplay = document.querySelector('.selected-count');
+            if (!countDisplay) {
+                countDisplay = document.createElement('span');
+                countDisplay.className = 'selected-count';
+                selectMajorBtn.parentNode.appendChild(countDisplay);
+            }
+            countDisplay.textContent = `${count} selected`;
+        }
+
+        function getSelectedDepartments() {
+            const checked = departmentsGrid.querySelectorAll('input[type="checkbox"]:checked');
+            return Array.from(checked).map(cb => cb.value);
+        }
+
+        // Log display functions
+        function startLogPolling() {
+            logContainer.classList.add('active');
+            logContent.innerHTML = '<div class="log-entry info">🔄 Starting log monitoring...</div>';
+            lastLogTimestamp = new Date().toISOString();
+            
+            logPollingInterval = setInterval(fetchLogs, 2000); // Poll every 2 seconds
+        }
+
+        function stopLogPolling() {
+            if (logPollingInterval) {
+                clearInterval(logPollingInterval);
+                logPollingInterval = null;
+            }
+        }
+
+        async function fetchLogs() {
+            try {
+                const response = await fetch(`/scrape/logs?since=${lastLogTimestamp}`);
+                const data = await response.json();
+                
+                if (data.logs && data.logs.length > 0) {
+                    data.logs.forEach(log => {
+                        appendLogEntry(log);
+                        if (log.timestamp > lastLogTimestamp) {
+                            lastLogTimestamp = log.timestamp;
+                        }
+                    });
+                    
+                    // Auto-scroll to bottom
+                    logContent.scrollTop = logContent.scrollHeight;
+                }
+            } catch (error) {
+                console.error('Error fetching logs:', error);
+            }
+        }
+
+        function appendLogEntry(log) {
+            const logDiv = document.createElement('div');
+            logDiv.className = `log-entry ${log.level}`;
+            
+            const timestamp = new Date(log.timestamp).toLocaleTimeString();
+            const metaStr = Object.keys(log.meta).length > 0 ? ` ${JSON.stringify(log.meta)}` : '';
+            
+            logDiv.textContent = `[${timestamp}] ${log.level.toUpperCase()}: ${log.message}${metaStr}`;
+            logContent.appendChild(logDiv);
+        }
+
+        function clearLogs() {
+            logContent.innerHTML = '';
+        }
+
+        // Form submission
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            if (isScraping) return;
+
+            const keyword = document.getElementById('keyword').value.trim();
+            const source = document.getElementById('source').value;
+            const enableEnrichment = document.getElementById('enableEnrichment').checked;
+            const enableN8nSending = document.getElementById('enableN8nSending').checked;
+            const oneByOneProcessing = document.getElementById('oneByOneProcessing').checked;
+            const selectedDepartments = getSelectedDepartments();
+
+            if (!keyword || !source) {
+                alert('Please fill in all required fields');
+                return;
+            }
+
+            // create sheet first and grab its id
+            let sheetId = null;
+            try {
+                const sheetResp = await fetch('/scrape/create-sheet', { method: 'POST' });
+                const sheetData = await sheetResp.json();
+                if (sheetData && sheetData.spreadsheetId) {
+                    sheetId = sheetData.spreadsheetId;
+                }
+            } catch (err) {
+                console.warn('Could not create sheet before scraping', err);
+            }
+
+            startScraping(keyword, source, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId);
+        });
+
+        // Reset button
+        resetButton.addEventListener('click', resetScrapingStatus);
+
+        async function startScraping(keyword, source, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId = null) {
+            isScraping = true;
+            button.disabled = true;
+            statusCard.classList.add('active');
+            
+            let statusText = enableEnrichment ? 
+                `Scraping ${keyword} from ${source} with enrichment...` : 
+                `Scraping ${keyword} from ${source}...`;
+            
+            if (selectedDepartments.length > 0) {
+                statusText += ` (${selectedDepartments.length} departments)`;
+            }
+            
+            updateStatus('loading', 'Scraping in progress...', statusText);
+            progressFill.style.width = '25%';
+
+            // Start log polling
+            startLogPolling();
+
+            try {
+                const response = await fetch('/scrape/start', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ 
+                        keyword, 
+                        source, 
+                        enableEnrichment, 
+                        enableN8nSending,
+                        oneByOneProcessing,
+                        departments: selectedDepartments,
+                        sheetId
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    const processingMode = oneByOneProcessing ? 'one by one' : 'in batch';
+                    updateStatus('success', 'Scraping completed!', 
+                        `Found ${result.leadsCount} leads${result.enrichment ? ' with enrichment' : ''}${result.n8nSending ? ` and sent to n8n ${processingMode}` : ''}`);
+                    progressFill.style.width = '100%';
+                    
+                    leadsCount.textContent = result.leadsCount;
+                    sheetLink.href = result.spreadsheetUrl;
+                    resultsSection.style.display = 'block';
+
+                    // Show detailed statistics
+                    if (result.stats) {
+                        showStatistics(result.stats);
+                    }
+                } else {
+                    throw new Error(result.error);
+                }
+
+            } catch (error) {
+                updateStatus('error', 'Scraping failed', error.message);
+                progressFill.style.width = '0%';
+            } finally {
+                isScraping = false;
+                button.disabled = false;
+                stopLogPolling();
+            }
+        }
+
+
+        function updateStatus(type, title, message) {
+            statusIndicator.className = `status-indicator ${type}`;
+            statusTitle.textContent = title;
+            statusMessage.textContent = message;
+        }
+
+        function showStatistics(stats) {
+            // Create statistics display
+            const statsHtml = `
+                <div class="statistics-section">
+                    <h4>📊 Statistics</h4>
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-label">Total Leads:</span>
+                            <span class="stat-value">${stats.total}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">With Email:</span>
+                            <span class="stat-value">${stats.withEmail}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">With Phone:</span>
+                            <span class="stat-value">${stats.withPhone}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">With Website:</span>
+                            <span class="stat-value">${stats.withWebsite}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">With LinkedIn:</span>
+                            <span class="stat-value">${stats.withLinkedIn}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Avg Score:</span>
+                            <span class="stat-value">${Math.round(stats.avgScore)}/100</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Priority A:</span>
+                            <span class="stat-value priority-a">${stats.priorityA}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Priority B:</span>
+                            <span class="stat-value priority-b">${stats.priorityB}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Priority C:</span>
+                            <span class="stat-value priority-c">${stats.priorityC}</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">Priority D:</span>
+                            <span class="stat-value priority-d">${stats.priorityD}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Insert statistics after the results info
+            const resultsInfo = document.querySelector('.results-info');
+            resultsInfo.insertAdjacentHTML('afterend', statsHtml);
+        }
+
+        function resetScrapingStatus() {
+            fetch('/scrape/reset', { method: 'POST' });
+            
+            statusCard.classList.remove('active');
+            progressFill.style.width = '0%';
+            resultsSection.style.display = 'none';
+            
+            // Remove statistics section if exists
+            const statsSection = document.querySelector('.statistics-section');
+            if (statsSection) {
+                statsSection.remove();
+            }
+            
+            // Clear and hide logs
+            clearLogs();
+            logContainer.classList.remove('active');
+            stopLogPolling();
+            
+            form.reset();
+            isScraping = false;
+            button.disabled = false;
+        }
+
+        // Check for existing status on page load
+        async function checkStatus() {
+            try {
+                const response = await fetch('/scrape/status');
+                const status = await response.json();
+                
+                if (status.isRunning) {
+                    statusCard.classList.add('active');
+                    updateStatus('loading', 'Scraping in progress...', `Scraping ${status.keyword} from ${status.source}...`);
+                    progressFill.style.width = '50%';
+                    button.disabled = true;
+                    isScraping = true;
+                    
+                    // Start log polling if scraping is running
+                    startLogPolling();
+                }
+                
+                if (status.spreadsheetUrl) {
+                    leadsCount.textContent = status.leadsCount;
+                    sheetLink.href = status.spreadsheetUrl;
+                    resultsSection.style.display = 'block';
+                    updateStatus('success', 'Scraping completed!', `Found ${status.leadsCount} leads`);
+                    progressFill.style.width = '100%';
+                }
+            } catch (error) {
+                console.error('Error checking status:', error);
+            }
+        }
+
+        // Check status on page load
+        checkStatus();
+        
+        // Initialize departments on page load
+        initializeDepartments();
+    </script>
+</body>
+</html>
