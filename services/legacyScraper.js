@@ -68,7 +68,6 @@ class RateLimiter {
 // CONFIGURATION
 // ─────────────────────────────────────────────
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.trouvezpourmoi.com/webhook/leads';
-
 const N8N_RATE_LIMITER = new RateLimiter({ maxPerWindow: 50, windowMs: 60 * 1000 });
 const OSM_RATE_LIMITER = new RateLimiter({ maxPerWindow: 5, windowMs: 60 * 1000 });
 const PJ_RATE_LIMITER = new RateLimiter({ maxPerWindow: 15, windowMs: 60 * 60 * 1000 });

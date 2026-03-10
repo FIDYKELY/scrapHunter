@@ -166,12 +166,12 @@ class ScrapeController {
         keyword: 'test'
       };
 
-      const result = await realtimeLeadProcessor.sendSingleLeadToN8n(testLead);
+      const result = await legacyScraper.sendToN8n(testLead);
 
       res.json({
-        success: result.success,
-        message: result.success ? 'Test webhook sent successfully' : 'Test webhook failed',
-        result
+        success: !!result,
+        message: result ? 'Test webhook sent successfully' : 'Test webhook failed',
+        result: { success: !!result }
       });
 
     } catch (error) {
