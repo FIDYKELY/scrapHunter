@@ -1,0 +1,33 @@
+{
+  "name": "scraping-ui",
+  "version": "1.0.0",
+  "description": "Web interface for scraping tool with Google Sheets integration - Legacy Scraper Mode",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.6",
+    "dotenv": "^16.3.1",
+    "ejs": "^4.0.1",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "googleapis": "^126.0.1",
+    "node-fetch": "^2.7.0",
+    "puppeteer": "^21.11.0",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "scraping",
+    "google-sheets",
+    "express",
+    "legacy-scraper",
+    "n8n-integration"
+  ],
+  "author": "",
+  "license": "MIT"
+}
