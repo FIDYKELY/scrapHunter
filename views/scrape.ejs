@@ -114,13 +114,19 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
-            margin-left: 1rem;
-            display: none;
+            margin-top: 10px;
+            width: 100%;
         }
 
         .stop-button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(229, 57, 53, 0.3);
+            box-shadow: 0 8px 25px rgba(220, 53, 69, 0.3);
+        }
+
+        .stop-button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .status-card {
@@ -693,12 +699,6 @@
                     </div>
                     <div class="form-group">
                         <label class="checkbox-label">
-                            <input type="checkbox" id="enableN8nSending" name="enableN8nSending" checked>
-                            <span>Envoyer au webhook n8n pour le stockage Google Sheets</span>
-                        </label>
-                    </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
                             <input type="checkbox" id="oneByOneProcessing" name="oneByOneProcessing" checked>
                             <span>Processus menant un par un (recommandé pour n8n)</span>
                         </label>
@@ -752,6 +752,10 @@
                     Commencer le scraping
                 </button>
 
+                <button type="button" class="stop-button" id="stopButton" style="display: none;">
+                    Arrêter le processus
+                </button>
+
                 <div class="log-container" id="logContainer">
                     <h3>📋 Journaux en temps réel</h3>
                     <div class="log-content" id="logContent"></div>
@@ -774,12 +778,17 @@
             <div class="results-section" id="resultsSection" style="display: none;">
                 <div class="results-info">
                     <div>
-                        <strong>Leads trouvées :</strong> <span id="leadsCount">0</span>
+                        <strong>Leads trouvés :</strong> <span id="leadsCount">0</span>
                     </div>
                     <div>
-                        <a href="#" id="sheetLink" class="sheet-link" target="_blank">Ouvrir Google Sheet</a>
+                        <a href="#" id="sheetLink" class="sheet-link" target="_blank" style="display:none;">Ouvrir Google Sheet</a>
                         <button id="resetButton" class="reset-button">Nouveau Scrape</button>
                     </div>
+                </div>
+                <!-- Résultats par destination -->
+                <div id="destResults" style="margin-top:1rem; display:none;">
+                    <div id="gsResult" class="dest-result-block" style="display:none;"></div>
+                    <div id="hsResult" class="dest-result-block" style="display:none;"></div>
                 </div>
                 <div id="statisticsContainer"></div>
             </div>
@@ -850,11 +859,9 @@
         const selectMajorBtn = document.getElementById('selectMajorDepts');
         const logContainer = document.getElementById('logContainer');
         const logContent = document.getElementById('logContent');
-
         // Initialize departments grid
         function initializeDepartments() {
             departmentsGrid.innerHTML = '';
-            
 
             Object.entries(DEPARTMENTS).forEach(([code, name]) => {
                 const deptDiv = document.createElement('div');
@@ -980,7 +987,6 @@
             const sourceCheckboxes = document.querySelectorAll('input[name="source"]:checked');
             const sources = Array.from(sourceCheckboxes).map(cb => cb.value);
             const enableEnrichment = document.getElementById('enableEnrichment').checked;
-            const enableN8nSending = document.getElementById('enableN8nSending').checked;
             const oneByOneProcessing = document.getElementById('oneByOneProcessing').checked;
             const selectedDepartments = getSelectedDepartments();
 
@@ -989,25 +995,37 @@
                 return;
             }
 
-            // create sheet first and grab its id
+            // Destinations
+            const destGoogleSheets = document.getElementById('destGoogleSheets').checked;
+            const destHubSpot      = document.getElementById('destHubSpot').checked;
+
+            // Validation destinations
+            if (!destGoogleSheets && !destHubSpot) {
+                document.getElementById('destError').style.display = 'block';
+                return;
+            }
+            document.getElementById('destError').style.display = 'none';
+
+            // Créer la feuille Google uniquement si Google Sheets est coché
             let sheetId = null;
-            try {
-                const sheetResp = await fetch('/scrape/create-sheet', { method: 'POST' });
-                const sheetData = await sheetResp.json();
-                if (sheetData && sheetData.spreadsheetId) {
-                    sheetId = sheetData.spreadsheetId;
+            if (destGoogleSheets) {
+                try {
+                    const sheetResp = await fetch('/scrape/create-sheet', { method: 'POST' });
+                    const sheetData = await sheetResp.json();
+                    if (sheetData && sheetData.spreadsheetId) sheetId = sheetData.spreadsheetId;
+                } catch (err) {
+                    console.warn('Could not create sheet', err);
                 }
-            } catch (err) {
-                console.warn('Could not create sheet before scraping', err);
             }
 
-            startScraping(keyword, sources, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId);
+            startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot);
         });
 
         // Custom Modal Logic
         const stopModal = document.getElementById('stopModal');
         const confirmStopBtn = document.getElementById('confirmStop');
         const cancelStopBtn = document.getElementById('cancelStop');
+
 
         function openStopModal() {
             stopModal.classList.add('active');
@@ -1051,7 +1069,7 @@
         // Reset button
         resetButton.addEventListener('click', resetScrapingStatus);
 
-        async function startScraping(keyword, sources, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId = null) {
+        async function startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId = null, destGoogleSheets = true, destHubSpot = false) {
             isScraping = true;
             button.disabled = true;
             button.style.display = 'none';
@@ -1078,15 +1096,15 @@
                 const response = await fetch('/scrape/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ 
-                        keyword, 
-                        source, 
-                        enableEnrichment, 
-                        enableN8nSending,
+                    body: JSON.stringify({
+                        keyword,
+                        source: sources,
+                        enableEnrichment,
+                        enableN8nSending: destGoogleSheets,
                         oneByOneProcessing,
-                        departments:     selectedDepartments,
+                        departments:      selectedDepartments,
                         sheetId,
-                        destGoogleSheets: enableN8nSending,
+                        destGoogleSheets,
                         destHubSpot
                     })
                 });
@@ -1100,8 +1118,10 @@
                     progressFill.style.width = '100%';
 
                     leadsCount.textContent = result.leadsCount;
-                    sheetLink.href = result.spreadsheetUrl;
                     resultsSection.style.display = 'block';
+
+                    // Résultats par destination
+                    showDestinationResults(result, destGoogleSheets, destHubSpot);
 
                     // Show detailed statistics
                     if (result.stats) {
@@ -1248,14 +1268,21 @@
             resultsSection.style.display = 'none';
             
             // Reset destination results
-            document.getElementById('destResults').style.display = 'none';
-            document.getElementById('gsResult').style.display = 'none';
-            document.getElementById('hsResult').style.display = 'none';
-            document.getElementById('sheetLink').style.display = 'none';
+            const dr = document.getElementById('destResults');
+            if (dr) dr.style.display = 'none';
+            const gr = document.getElementById('gsResult');
+            if (gr) gr.style.display = 'none';
+            const hr = document.getElementById('hsResult');
+            if (hr) hr.style.display = 'none';
+            const sl = document.getElementById('sheetLink');
+            if (sl) sl.style.display = 'none';
 
             // Remove statistics section if exists
             const statsSection = document.querySelector('.statistics-section');
             if (statsSection) statsSection.remove();
+            // Remove statsContainer content
+            const sc = document.getElementById('statisticsContainer');
+            if (sc) sc.innerHTML = '';
             
             clearLogs();
             logContainer.classList.remove('active');
@@ -1263,9 +1290,12 @@
             
             form.reset();
             // Remettre Google Sheets coché par défaut
-            document.getElementById('destGoogleSheets').checked = true;
+            const gsCheck = document.getElementById('destGoogleSheets');
+            if (gsCheck) gsCheck.checked = true;
             isScraping = false;
             button.disabled = false;
+            button.style.display = 'inline-block';
+            stopButton.style.display = 'none';
         }
 
         // Check for existing status on page load

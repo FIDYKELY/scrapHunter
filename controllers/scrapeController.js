@@ -8,19 +8,21 @@ class ScrapeController {
   async startScraping(req, res) {
     const {
       keyword,
-      source,
+      source,               // peut être string (compat) ou array
       enableEnrichment    = true,
       enableN8nSending    = true,
       oneByOneProcessing  = true,
       departments         = [],
       sheetId             = null,
-      // ── nouvelles options de destination ──
-      destGoogleSheets    = true,   // true = comportement actuel (webhook n8n → Google Sheets)
+      destGoogleSheets    = true,
       destHubSpot         = false
     } = req.body;
 
-    if (!keyword || !source) {
-      return res.status(400).json({ error: 'Keyword and source are required' });
+    // Normaliser source en tableau (multi-source depuis les checkboxes)
+    const sources = Array.isArray(source) ? source : (source ? [source] : []);
+
+    if (!keyword || sources.length === 0) {
+      return res.status(400).json({ error: 'Keyword and at least one source are required' });
     }
 
     // Au moins une destination doit être cochée
@@ -29,13 +31,13 @@ class ScrapeController {
     }
 
     try {
-      console.log(`🚀 Starting scraping: keyword="${keyword}", source="${source}", departments="${departments.length > 0 ? departments.join(',') : 'ALL'}"`);
+      console.log(`🚀 Starting scraping: keyword="${keyword}", sources="${sources.join(',')}", departments="${departments.length > 0 ? departments.join(',') : 'ALL'}"`);
       console.log(`📤 Destinations: Google Sheets=${destGoogleSheets}, HubSpot=${destHubSpot}`);
 
       req.session.scrapingStatus = {
         isRunning: true,
         keyword,
-        source,
+        source: sources,
         departments,
         startTime: new Date(),
         leadsCount: 0,
@@ -48,7 +50,7 @@ class ScrapeController {
 
       // ── SCRAPING + ENRICHISSEMENT ─────────────────────────────────────
       // On désactive l'envoi n8n interne si Google Sheets n'est pas coché
-      const results = await legacyScraper.mainProcess(keyword, source, departments, {
+      const results = await legacyScraper.mainProcess(keyword, sources, departments, {
         sheetId,
         enableN8nSending: enableN8nSending && destGoogleSheets
       });
@@ -75,7 +77,7 @@ class ScrapeController {
         message:           `${results.successful} leads traités avec succès`,
         leadsCount:        results.successful,
         keyword,
-        source,
+        source: sources,
         enrichment:        enableEnrichment,
         n8nSending:        enableN8nSending && destGoogleSheets,
         oneByOneProcessing,
@@ -197,6 +199,11 @@ class ScrapeController {
         error: error.message
       });
     }
+  }
+
+  async checkHubSpot(req, res) {
+    const status = await hubspotService.checkConnection();
+    res.json(status);
   }
 }
 

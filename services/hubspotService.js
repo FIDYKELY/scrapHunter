@@ -28,119 +28,69 @@ async function hsRequest(method, endpoint, body = null) {
   return res.json();
 }
 
-// ─────────────────────────────────────────────
-// AUTO-PROVISION DES PROPRIÉTÉS CUSTOM
-// ─────────────────────────────────────────────
+function isPropertyError(err) {
+  return err.message.includes('PROPERTY_DOESNT_EXIST');
+}
 
-const CUSTOM_COMPANY_PROPS = [
+// ─────────────────────────────────────────────
+// PROPRIÉTÉS CUSTOM CONNUES
+// Liste des noms qu'on essaie d'envoyer mais qui peuvent ne pas exister.
+// ─────────────────────────────────────────────
+const CUSTOM_PROPS = new Set([
   'lead_departement', 'lead_source', 'lead_type_profil', 'lead_score',
   'lead_priorite', 'linkedin_company_page', 'facebook_company_page',
   'instagram_company_page', 'external_lead_id', 'crawl_batch_id',
   'google_rating', 'google_reviews_count'
-];
+]);
 
-const CUSTOM_CONTACT_PROPS = [
-  'external_lead_id', 'lead_score', 'lead_priorite', 'lead_source'
-];
-
-const PROP_LABELS = {
-  lead_departement:       'Département',
-  lead_source:            'Source scraping',
-  lead_type_profil:       'Type profil',
-  lead_score:             'Score lead',
-  lead_priorite:          'Priorité lead',
-  linkedin_company_page:  'LinkedIn Company',
-  facebook_company_page:  'Facebook Company',
-  instagram_company_page: 'Instagram Company',
-  external_lead_id:       'ID lead externe',
-  crawl_batch_id:         'Batch ID crawl',
-  google_rating:          'Note Google',
-  google_reviews_count:   'Nb avis Google',
-};
-
-let propertiesProvisioned = false;
-
-/**
- * Récupère le premier groupName disponible pour un objet HubSpot
- * (évite l'erreur "group doesn't exist")
- */
-async function getDefaultGroup(objectType) {
-  try {
-    const res = await hsRequest('GET', `/crm/v3/properties/${objectType}/groups`);
-    const groups = res.results || [];
-    // Préférer un groupe "custom" ou "information", sinon prendre le premier
-    const preferred = groups.find(g =>
-      g.name.includes('information') || g.name.includes('custom') || g.name.includes('companyinformation')
-    );
-    const group = preferred || groups[0];
-    if (group) {
-      logInfo(`HubSpot: groupe utilisé pour ${objectType}: ${group.name}`);
-      return group.name;
-    }
-  } catch (err) {
-    logWarning(`HubSpot: impossible de lister les groupes ${objectType} — ${err.message}`);
-  }
-  // Valeurs par défaut connues de HubSpot
-  return objectType === 'companies' ? 'companyinformation' : 'contactinformation';
+// Retourne un objet sans les propriétés custom
+function stripCustomProps(props) {
+  return Object.fromEntries(
+    Object.entries(props).filter(([k]) => !CUSTOM_PROPS.has(k))
+  );
 }
 
-async function provisionPropsForObject(objectType, propNames) {
-  // 1. Récupérer les propriétés existantes
-  let existing = new Set();
-  try {
-    const res = await hsRequest('GET', `/crm/v3/properties/${objectType}`);
-    (res.results || []).forEach(p => existing.add(p.name));
-    logInfo(`HubSpot: ${existing.size} propriétés existantes pour ${objectType}`);
-  } catch (err) {
-    logWarning(`HubSpot: impossible de lister les propriétés ${objectType} — ${err.message}`);
-    return;
-  }
-
-  const missing = propNames.filter(n => !existing.has(n));
-  if (missing.length === 0) {
-    logInfo(`HubSpot: toutes les propriétés ${objectType} sont déjà présentes`);
-    return;
-  }
-
-  logInfo(`HubSpot: ${missing.length} propriété(s) à créer pour ${objectType}: ${missing.join(', ')}`);
-
-  // 2. Récupérer un groupName valide
-  const groupName = await getDefaultGroup(objectType);
-
-  // 3. Créer chaque propriété manquante
-  for (const name of missing) {
-    try {
-      const payload = {
-        name,
-        label:     PROP_LABELS[name] || name,
-        type:      'string',
-        fieldType: 'text',
-        groupName
-      };
-      await hsRequest('POST', `/crm/v3/properties/${objectType}`, payload);
-      logInfo(`HubSpot: ✅ propriété créée — ${objectType}.${name}`);
-    } catch (err) {
-      // Si elle existe déjà (race condition ou cache) on ignore
-      if (
-        err.message.includes('PROPERTY_EXISTS') ||
-        err.message.includes('already exists') ||
-        err.message.includes('409')
-      ) {
-        logInfo(`HubSpot: propriété déjà existante (ok) — ${objectType}.${name}`);
-      } else {
-        logError(`HubSpot: ❌ impossible de créer ${objectType}.${name} — ${err.message}`);
-      }
-    }
-  }
+// Formate les propriétés custom en texte pour une note HubSpot
+function buildNoteText(lead) {
+  const lines = ['📊 Données scrapHunter'];
+  if (lead.source)               lines.push(`Source: ${lead.source}`);
+  if (lead.departement)          lines.push(`Département: ${lead.departement}`);
+  if (lead.score_global != null) lines.push(`Score: ${lead.score_global}/100`);
+  if (lead.priorite)             lines.push(`Priorité: ${lead.priorite}`);
+  if (lead.type_profil)          lines.push(`Profil: ${lead.type_profil}`);
+  if (lead.lead_id)              lines.push(`ID: ${lead.lead_id}`);
+  if (lead.crawl_batch_id)       lines.push(`Batch: ${lead.crawl_batch_id}`);
+  if (lead.google_rating)        lines.push(`Note Google: ${lead.google_rating}⭐`);
+  if (lead.linkedin_company_url) lines.push(`LinkedIn: ${lead.linkedin_company_url}`);
+  if (lead.facebook_url)         lines.push(`Facebook: ${lead.facebook_url}`);
+  if (lead.instagram_url)        lines.push(`Instagram: ${lead.instagram_url}`);
+  return lines.join('\n');
 }
 
-async function ensureCustomProperties() {
-  if (propertiesProvisioned) return;
-  logInfo('HubSpot: vérification/création des propriétés custom…');
-  await provisionPropsForObject('companies', CUSTOM_COMPANY_PROPS);
-  await provisionPropsForObject('contacts',  CUSTOM_CONTACT_PROPS);
-  propertiesProvisioned = true;
-  logInfo('HubSpot: provisioning terminé ✅');
+// ─────────────────────────────────────────────
+// SANITISATION DES DONNÉES SCRAPÉES
+// ─────────────────────────────────────────────
+
+const FAKE_EMAIL_EXTENSIONS = /\.(webp|png|jpg|jpeg|gif|svg|ico|pdf|css|js|woff|ttf|frnum|htm|html|php|asp)$/i;
+const VALID_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,6}$/;
+
+function sanitizeEmail(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const email = raw.trim().toLowerCase();
+  if (!VALID_EMAIL_RE.test(email))       return null;
+  if (FAKE_EMAIL_EXTENSIONS.test(email)) return null;
+  const domain = email.split('@')[1] || '';
+  if (/^\d+x\d+/.test(domain))         return null;
+  return email;
+}
+
+function sanitizeName(raw) {
+  if (!raw || typeof raw !== 'string') return 'Agence inconnue';
+  const firstLine = raw
+    .split(/\n/)
+    .map(l => l.trim())
+    .find(l => l.length > 0);
+  return firstLine || 'Agence inconnue';
 }
 
 // ─────────────────────────────────────────────
@@ -148,7 +98,7 @@ async function ensureCustomProperties() {
 // ─────────────────────────────────────────────
 function buildCompanyProps(lead) {
   const props = {
-    name:    lead.nom_entreprise   || 'Agence inconnue',
+    name:    sanitizeName(lead.nom_entreprise),
     city:    lead.ville            || '',
     zip:     lead.code_postal      || '',
     country: 'France',
@@ -156,6 +106,7 @@ function buildCompanyProps(lead) {
     phone:   lead.telephone        || '',
     website: lead.site_web         || ''
   };
+  // Propriétés custom (peuvent échouer si non créées dans le portail)
   if (lead.departement)          props.lead_departement       = lead.departement;
   if (lead.source)               props.lead_source            = lead.source;
   if (lead.type_profil)          props.lead_type_profil       = lead.type_profil;
@@ -172,16 +123,19 @@ function buildCompanyProps(lead) {
 
 function buildContactProps(lead) {
   const props = {
-    firstname:      lead.nom_entreprise || 'Contact',
+    firstname:      sanitizeName(lead.nom_entreprise) || 'Contact',
     lastname:       '',
-    company:        lead.nom_entreprise || '',
+    company:        sanitizeName(lead.nom_entreprise) || '',
     phone:          lead.telephone      || '',
     city:           lead.ville          || '',
     zip:            lead.code_postal    || '',
     country:        'France',
     hs_lead_status: 'NEW'
   };
-  if (lead.email)                props.email            = lead.email;
+  const cleanEmail = sanitizeEmail(lead.email);
+  if (cleanEmail)                props.email            = cleanEmail;
+  else if (lead.email)           logWarning(`HubSpot: email invalide ignoré pour ${sanitizeName(lead.nom_entreprise)}: ${lead.email}`);
+  // Propriétés custom contact
   if (lead.lead_id)              props.external_lead_id = lead.lead_id;
   if (lead.score_global != null) props.lead_score       = String(lead.score_global);
   if (lead.priorite)             props.lead_priorite    = lead.priorite;
@@ -190,21 +144,68 @@ function buildContactProps(lead) {
 }
 
 // ─────────────────────────────────────────────
+// CRÉATION AVEC FALLBACK AUTOMATIQUE
+// Tente avec toutes les props → si PROPERTY_DOESNT_EXIST → retente sans custom
+// ─────────────────────────────────────────────
+async function createWithFallback(objectType, properties, lead) {
+  try {
+    return await hsRequest('POST', `/crm/v3/objects/${objectType}`, { properties });
+  } catch (err) {
+    if (!isPropertyError(err)) throw err; // autre erreur → on remonte
+
+    logWarning(`HubSpot: propriétés custom inconnues pour ${objectType}, envoi en mode dégradé`);
+    const nativeOnly = stripCustomProps(properties);
+    const obj = await hsRequest('POST', `/crm/v3/objects/${objectType}`, { properties: nativeOnly });
+
+    // Stocker les données custom dans une note associée à la company
+    if (objectType === 'companies') {
+      await createNoteForCompany(obj.id, buildNoteText(lead)).catch(e =>
+        logWarning(`HubSpot: impossible de créer la note — ${e.message}`)
+      );
+    }
+    return { ...obj, _degraded: true };
+  }
+}
+
+async function updateWithFallback(objectType, id, properties) {
+  try {
+    return await hsRequest('PATCH', `/crm/v3/objects/${objectType}/${id}`, { properties });
+  } catch (err) {
+    if (!isPropertyError(err)) throw err;
+    logWarning(`HubSpot: propriétés custom inconnues pour PATCH ${objectType}, envoi natif seulement`);
+    const nativeOnly = stripCustomProps(properties);
+    return await hsRequest('PATCH', `/crm/v3/objects/${objectType}/${id}`, { properties: nativeOnly });
+  }
+}
+
+// ─────────────────────────────────────────────
+// NOTE DE FALLBACK (données custom en texte)
+// ─────────────────────────────────────────────
+async function createNoteForCompany(companyId, noteBody) {
+  const note = await hsRequest('POST', '/crm/v3/objects/notes', {
+    properties: {
+      hs_note_body:      noteBody,
+      hs_timestamp:      String(Date.now())
+    }
+  });
+  // Associer la note à la company
+  await hsRequest('PUT',
+    `/crm/v3/objects/notes/${note.id}/associations/companies/${companyId}/note_to_company`,
+    {}
+  );
+  logInfo(`HubSpot: note créée pour company ${companyId}`);
+}
+
+// ─────────────────────────────────────────────
 // DÉDUPLICATION
 // ─────────────────────────────────────────────
 async function findExistingCompany(lead) {
   try {
-    if (lead.lead_id) {
-      const r = await hsRequest('POST', '/crm/v3/objects/companies/search', {
-        filterGroups: [{ filters: [{ propertyName: 'external_lead_id', operator: 'EQ', value: lead.lead_id }] }],
-        properties: ['hs_object_id', 'name']
-      });
-      if (r.results?.length) return r.results[0];
-    }
+    // Cherche par nom + ville (external_lead_id peut ne pas exister comme propriété)
     if (lead.nom_entreprise) {
       const r = await hsRequest('POST', '/crm/v3/objects/companies/search', {
         filterGroups: [{ filters: [
-          { propertyName: 'name', operator: 'EQ', value: lead.nom_entreprise },
+          { propertyName: 'name', operator: 'EQ', value: sanitizeName(lead.nom_entreprise) },
           { propertyName: 'city', operator: 'EQ', value: lead.ville || '' }
         ]}],
         properties: ['hs_object_id', 'name']
@@ -236,23 +237,28 @@ async function findExistingContact(email) {
 async function upsertCompany(lead) {
   const properties = buildCompanyProps(lead);
   const existing   = await findExistingCompany(lead);
+
   if (existing) {
-    const r = await hsRequest('PATCH', `/crm/v3/objects/companies/${existing.id}`, { properties });
+    const r = await updateWithFallback('companies', existing.id, properties);
+    logInfo(`HubSpot company mise à jour: ${lead.nom_entreprise}`, { id: r.id });
     return { ...r, _action: 'updated' };
   }
-  const r = await hsRequest('POST', '/crm/v3/objects/companies', { properties });
+  const r = await createWithFallback('companies', properties, lead);
+  logInfo(`HubSpot company créée${r._degraded ? ' (mode dégradé)' : ''}: ${lead.nom_entreprise}`, { id: r.id });
   return { ...r, _action: 'created' };
 }
 
 async function upsertContact(lead) {
   if (!lead.email && !lead.telephone) return null;
+
   const properties = buildContactProps(lead);
   const existing   = await findExistingContact(lead.email);
+
   if (existing) {
-    const r = await hsRequest('PATCH', `/crm/v3/objects/contacts/${existing.id}`, { properties });
+    const r = await updateWithFallback('contacts', existing.id, properties);
     return { ...r, _action: 'updated' };
   }
-  const r = await hsRequest('POST', '/crm/v3/objects/contacts', { properties });
+  const r = await createWithFallback('contacts', properties, lead);
   return { ...r, _action: 'created' };
 }
 
@@ -276,7 +282,13 @@ async function sendLeadToHubSpot(lead) {
     const company = await upsertCompany(lead);
     const contact = await upsertContact(lead);
     if (contact && company) await associateContactToCompany(contact.id, company.id);
-    return { success: true, companyId: company?.id, contactId: contact?.id, action: company?._action };
+    return {
+      success:   true,
+      companyId: company?.id,
+      contactId: contact?.id,
+      action:    company?._action,
+      degraded:  !!company?._degraded
+    };
   } catch (err) {
     logError(`HubSpot erreur pour "${lead.nom_entreprise}": ${err.message}`);
     return { success: false, error: err.message };
@@ -284,10 +296,7 @@ async function sendLeadToHubSpot(lead) {
 }
 
 async function sendLeadsToHubSpot(leads) {
-  const stats = { created: 0, updated: 0, failed: 0, errors: [] };
-
-  // Provision des propriétés AVANT le premier envoi
-  await ensureCustomProperties();
+  const stats = { created: 0, updated: 0, failed: 0, degraded: 0, errors: [] };
 
   logInfo(`HubSpot: envoi de ${leads.length} lead(s)`);
   for (let i = 0; i < leads.length; i++) {
@@ -295,6 +304,7 @@ async function sendLeadsToHubSpot(leads) {
       const r = await sendLeadToHubSpot(leads[i]);
       if (r.success) {
         r.action === 'updated' ? stats.updated++ : stats.created++;
+        if (r.degraded) stats.degraded++;
       } else {
         stats.failed++;
         if (r.error) stats.errors.push(`${leads[i].nom_entreprise}: ${r.error}`);
@@ -306,6 +316,9 @@ async function sendLeadsToHubSpot(leads) {
     if (i < leads.length - 1) await new Promise(r => setTimeout(r, 150));
   }
 
+  if (stats.degraded > 0) {
+    logWarning(`HubSpot: ${stats.degraded} lead(s) envoyé(s) en mode dégradé (propriétés custom manquantes). Pour les activer, voir README.`);
+  }
   logInfo('HubSpot batch terminé', stats);
   return stats;
 }
