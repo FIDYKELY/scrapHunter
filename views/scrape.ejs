@@ -423,42 +423,42 @@
         <h1>Scraping Tool</h1>
         <div class="user-info">
             <span><%= user.email %></span>
-            <a href="/logout" class="logout-link">Logout</a>
+            <a href="/logout" class="logout-link">Déconnexion</a>
         </div>
     </header>
 
     <div class="container">
         <div class="scrape-card">
-            <h2>Start Scraping</h2>
+            <h2>Commencer le Scraping</h2>
             <form id="scrapeForm">
                 <div class="form-group">
-                    <label for="keyword">Keyword</label>
+                    <label for="keyword">Mot-clé</label>
                     <input 
                         type="text" 
                         id="keyword" 
                         name="keyword" 
                         required 
-                        placeholder="e.g., restaurant, plumber, dentist"
+                        placeholder="ex., restaurant, plombier, dentiste"
                     >
                 </div>
 
                 <div class="form-group">
                     <label for="source">Source</label>
                     <select id="source" name="source" required>
-                        <option value="">Select a source</option>
+                        <option value="">Sélectionnez une source</option>
                         <option value="OpenStreetMap">OpenStreetMap</option>
                         <option value="PagesJaunes">PagesJaunes</option>
-                        <option value="TEST_DATA">🧪 Test Data (Recommended)</option>
+                        <option value="TEST_DATA">🧪 Test Data (Recommandé)</option>
                     </select>
                 </div>
 
                 <div class="form-group">
-                    <label for="departments">Departments (Optional - Leave empty for all)</label>
+                    <label for="departments">Départements (Facultatif - Laisser vide pour tous)</label>
                     <div class="departments-container">
                         <div class="departments-header">
-                            <button type="button" id="selectAllDepts" class="dept-button">Select All</button>
-                            <button type="button" id="deselectAllDepts" class="dept-button">Deselect All</button>
-                            <button type="button" id="selectMajorDepts" class="dept-button">Major Cities</button>
+                            <button type="button" id="selectAllDepts" class="dept-button">Tout sélectionner</button>
+                            <button type="button" id="deselectAllDepts" class="dept-button">Tout désélectionner</button>
+                            <button type="button" id="selectMajorDepts" class="dept-button">Grandes villes</button>
                         </div>
                         <div class="departments-grid" id="departmentsGrid">
                             <!-- Departments will be populated by JavaScript -->
@@ -467,33 +467,33 @@
                 </div>
 
                 <div class="options-section">
-                    <h3>Processing Options</h3>
+                    <h3>Options de traitement</h3>
                     <div class="form-group">
                         <label class="checkbox-label">
                             <input type="checkbox" id="enableEnrichment" name="enableEnrichment" checked>
-                            <span>Enable data enrichment (website & social media)</span>
+                            <span>Activer l'enrichissement des données (site web et réseaux sociaux)</span>
                         </label>
                     </div>
                     <div class="form-group">
                         <label class="checkbox-label">
                             <input type="checkbox" id="enableN8nSending" name="enableN8nSending" checked>
-                            <span>Send to n8n webhook for Google Sheets storage</span>
+                            <span>Envoyer au webhook n8n pour le stockage Google Sheets</span>
                         </label>
                     </div>
                     <div class="form-group">
                         <label class="checkbox-label">
                             <input type="checkbox" id="oneByOneProcessing" name="oneByOneProcessing" checked>
-                            <span>Process leads one by one (recommended for n8n)</span>
+                            <span>Processus menant un par un (recommandé pour n8n)</span>
                         </label>
                     </div>
                 </div>
 
                 <button type="submit" class="scrape-button" id="scrapeButton">
-                    Start Scraping
+                    Commencer le scraping
                 </button>
 
                 <div class="log-container" id="logContainer">
-                    <h3>📋 Real-time Logs</h3>
+                    <h3>📋 Journaux en temps réel</h3>
                     <div class="log-content" id="logContent"></div>
                 </div>
         </div>
@@ -502,8 +502,8 @@
             <div class="status-header">
                 <div class="status-indicator" id="statusIndicator"></div>
                 <div class="status-info">
-                    <h3 id="statusTitle">Ready to scrape</h3>
-                    <p id="statusMessage">Configure your scraping parameters above</p>
+                    <h3 id="statusTitle">Prêt à scraper</h3>
+                    <p id="statusMessage">Configurez vos paramètres de scraping ci-dessus</p>
                 </div>
             </div>
 
@@ -514,11 +514,11 @@
             <div class="results-section" id="resultsSection" style="display: none;">
                 <div class="results-info">
                     <div>
-                        <strong>Leads Found:</strong> <span id="leadsCount">0</span>
+                        <strong>Leads trouvées :</strong> <span id="leadsCount">0</span>
                     </div>
                     <div>
-                        <a href="#" id="sheetLink" class="sheet-link" target="_blank">Open Google Sheet</a>
-                        <button id="resetButton" class="reset-button">New Scrape</button>
+                        <a href="#" id="sheetLink" class="sheet-link" target="_blank">Ouvrir Google Sheet</a>
+                        <button id="resetButton" class="reset-button">Nouveau Scrape</button>
                     </div>
                 </div>
             </div>
@@ -630,7 +630,7 @@
                 countDisplay.className = 'selected-count';
                 selectMajorBtn.parentNode.appendChild(countDisplay);
             }
-            countDisplay.textContent = `${count} selected`;
+            countDisplay.textContent = `${count} sélectionné(s)`;
         }
 
         function getSelectedDepartments() {
