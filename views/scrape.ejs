@@ -104,6 +104,25 @@
             cursor: not-allowed;
         }
 
+        .stop-button {
+            background: linear-gradient(135deg, #e53935 0%, #b71c1c 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-left: 1rem;
+            display: none;
+        }
+
+        .stop-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(229, 57, 53, 0.3);
+        }
+
         .status-card {
             background: white;
             border-radius: 10px;
@@ -137,9 +156,17 @@
         }
 
         @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
+            0% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+
+            100% {
+                opacity: 1;
+            }
         }
 
         .status-info {
@@ -171,6 +198,97 @@
             background: linear-gradient(90deg, #667eea, #764ba2);
             width: 0%;
             transition: width 0.3s ease;
+        }
+
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            color: #e53935;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 0.75rem;
+        }
+
+        .modal-text {
+            color: #6b7280;
+            margin-bottom: 1.5rem;
+            line-height: 1.5;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        .modal-btn {
+            padding: 0.625rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+
+        .modal-btn-cancel {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .modal-btn-cancel:hover {
+            background: #e5e7eb;
+        }
+
+        .modal-btn-confirm {
+            background: #ef4444;
+            color: white;
+        }
+
+        .modal-btn-confirm:hover {
+            background: #dc2626;
+            box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.2);
         }
 
         .results-section {
@@ -251,6 +369,12 @@
             color: #555;
         }
 
+        .sources-group {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
         .statistics-section {
             margin-top: 1.5rem;
             padding: 1rem;
@@ -293,10 +417,22 @@
             color: #333;
         }
 
-        .priority-a { color: #28a745; }
-    .priority-b { color: #ffc107; }
-    .priority-c { color: #fd7e14; }
-    .priority-d { color: #dc3545; }
+        .priority-a {
+            color: #28a745;
+        }
+
+        .priority-b {
+            color: #ffc107;
+        }
+
+        .priority-c {
+            color: #fd7e14;
+        }
+
+        .priority-d {
+            color: #dc3545;
+        }
+
         .log-container {
             background: #f8f9fa;
             border: 2px solid #e1e5e9;
@@ -337,10 +473,22 @@
             line-height: 1.3;
         }
 
-        .log-entry.error { color: #ff6b6b; }
-        .log-entry.warning { color: #ffd93d; }
-        .log-entry.info { color: #6bcf7f; }
-        .log-entry.debug { color: #a8a8a8; }
+        .log-entry.error {
+            color: #ff6b6b;
+        }
+
+        .log-entry.warning {
+            color: #ffd93d;
+        }
+
+        .log-entry.info {
+            color: #6bcf7f;
+        }
+
+        .log-entry.debug {
+            color: #a8a8a8;
+        }
+
         .departments-container {
             border: 2px solid #e1e5e9;
             border-radius: 5px;
@@ -486,7 +634,9 @@
     <header class="header">
         <h1>Scraping Tool</h1>
         <div class="user-info">
-            <span><%= user.email %></span>
+            <span>
+                <%= user.email %>
+            </span>
             <a href="/logout" class="logout-link">Déconnexion</a>
         </div>
     </header>
@@ -497,23 +647,26 @@
             <form id="scrapeForm">
                 <div class="form-group">
                     <label for="keyword">Mot-clé</label>
-                    <input 
-                        type="text" 
-                        id="keyword" 
-                        name="keyword" 
-                        required 
-                        placeholder="ex., restaurant, plombier, dentiste"
-                    >
+                    <input type="text" id="keyword" name="keyword" required
+                        placeholder="ex., restaurant, plombier, dentiste">
                 </div>
 
                 <div class="form-group">
-                    <label for="source">Source</label>
-                    <select id="source" name="source" required>
-                        <option value="">Sélectionnez une source</option>
-                        <option value="OpenStreetMap">OpenStreetMap</option>
-                        <option value="PagesJaunes">PagesJaunes</option>
-                        <option value="TEST_DATA">🧪 Test Data (Recommandé)</option>
-                    </select>
+                    <label>Sources</label>
+                    <div class="sources-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="source" value="OpenStreetMap" checked>
+                            <span>OpenStreetMap</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="source" value="PagesJaunes" checked>
+                            <span>PagesJaunes</span>
+                        </label>
+                        <label class="checkbox-label">
+                            <input type="checkbox" name="source" value="TEST_DATA">
+                            <span>🧪 Test Data (Recommandé)</span>
+                        </label>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -540,8 +693,14 @@
                     </div>
                     <div class="form-group">
                         <label class="checkbox-label">
+                            <input type="checkbox" id="enableN8nSending" name="enableN8nSending" checked>
+                            <span>Envoyer au webhook n8n pour le stockage Google Sheets</span>
+                        </label>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
                             <input type="checkbox" id="oneByOneProcessing" name="oneByOneProcessing" checked>
-                            <span>Processus menant un par un (recommandé)</span>
+                            <span>Processus menant un par un (recommandé pour n8n)</span>
                         </label>
                     </div>
                 </div>
@@ -615,17 +774,28 @@
             <div class="results-section" id="resultsSection" style="display: none;">
                 <div class="results-info">
                     <div>
-                        <strong>Leads trouvés :</strong> <span id="leadsCount">0</span>
+                        <strong>Leads trouvées :</strong> <span id="leadsCount">0</span>
                     </div>
                     <div>
-                        <a href="#" id="sheetLink" class="sheet-link" target="_blank" style="display:none;">Ouvrir Google Sheet</a>
+                        <a href="#" id="sheetLink" class="sheet-link" target="_blank">Ouvrir Google Sheet</a>
                         <button id="resetButton" class="reset-button">Nouveau Scrape</button>
                     </div>
                 </div>
-                <div id="destResults" style="margin-top:1rem; display:none;">
-                    <div id="gsResult" class="dest-result-block" style="display:none;"></div>
-                    <div id="hsResult" class="dest-result-block" style="display:none;"></div>
-                </div>
+                <div id="statisticsContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="stopModal">
+        <div class="modal-content">
+            <div class="modal-icon">⚠️</div>
+            <div class="modal-title">Arrêter le processus ?</div>
+            <div class="modal-text">
+                Êtes-vous sûr de vouloir arrêter le scraping ? Les données déjà collectées seront conservées.
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" id="cancelStop">Annuler</button>
+                <button class="modal-btn modal-btn-confirm" id="confirmStop">Arrêter</button>
             </div>
         </div>
     </div>
@@ -664,6 +834,7 @@
         // DOM elements
         const form = document.getElementById('scrapeForm');
         const button = document.getElementById('scrapeButton');
+        const stopButton = document.getElementById('stopButton');
         const statusCard = document.getElementById('statusCard');
         const statusIndicator = document.getElementById('statusIndicator');
         const statusTitle = document.getElementById('statusTitle');
@@ -684,6 +855,7 @@
         function initializeDepartments() {
             departmentsGrid.innerHTML = '';
             
+
             Object.entries(DEPARTMENTS).forEach(([code, name]) => {
                 const deptDiv = document.createElement('div');
                 deptDiv.className = 'dept-checkbox';
@@ -728,6 +900,7 @@
             const checked = departmentsGrid.querySelectorAll('input[type="checkbox"]:checked');
             const count = checked.length;
             
+
             // Update or create count display
             let countDisplay = document.querySelector('.selected-count');
             if (!countDisplay) {
@@ -749,6 +922,7 @@
             logContent.innerHTML = '<div class="log-entry info">🔄 Starting log monitoring...</div>';
             lastLogTimestamp = new Date().toISOString();
             
+
             logPollingInterval = setInterval(fetchLogs, 2000); // Poll every 2 seconds
         }
 
@@ -764,6 +938,7 @@
                 const response = await fetch(`/scrape/logs?since=${lastLogTimestamp}`);
                 const data = await response.json();
                 
+
                 if (data.logs && data.logs.length > 0) {
                     data.logs.forEach(log => {
                         appendLogEntry(log);
@@ -783,10 +958,10 @@
         function appendLogEntry(log) {
             const logDiv = document.createElement('div');
             logDiv.className = `log-entry ${log.level}`;
-            
+
             const timestamp = new Date(log.timestamp).toLocaleTimeString();
             const metaStr = Object.keys(log.meta).length > 0 ? ` ${JSON.stringify(log.meta)}` : '';
-            
+
             logDiv.textContent = `[${timestamp}] ${log.level.toUpperCase()}: ${log.message}${metaStr}`;
             logContent.appendChild(logDiv);
         }
@@ -798,63 +973,105 @@
         // Form submission
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             if (isScraping) return;
 
             const keyword = document.getElementById('keyword').value.trim();
-            const source  = document.getElementById('source').value;
-            const enableEnrichment   = document.getElementById('enableEnrichment').checked;
+            const sourceCheckboxes = document.querySelectorAll('input[name="source"]:checked');
+            const sources = Array.from(sourceCheckboxes).map(cb => cb.value);
+            const enableEnrichment = document.getElementById('enableEnrichment').checked;
+            const enableN8nSending = document.getElementById('enableN8nSending').checked;
             const oneByOneProcessing = document.getElementById('oneByOneProcessing').checked;
             const selectedDepartments = getSelectedDepartments();
 
-            // Destinations
-            const destGoogleSheets = document.getElementById('destGoogleSheets').checked;
-            const destHubSpot      = document.getElementById('destHubSpot').checked;
-
-            if (!keyword || !source) {
-                alert('Veuillez remplir tous les champs obligatoires');
+            if (!keyword || sources.length === 0) {
+                alert('Veuillez remplir tous les champs obligatoires (Mot-clé et au moins une Source)');
                 return;
             }
 
-            // Validation destinations
-            if (!destGoogleSheets && !destHubSpot) {
-                document.getElementById('destError').style.display = 'block';
-                return;
-            }
-            document.getElementById('destError').style.display = 'none';
-
-            // Créer la feuille Google si Google Sheets est coché
+            // create sheet first and grab its id
             let sheetId = null;
-            if (destGoogleSheets) {
-                try {
-                    const sheetResp = await fetch('/scrape/create-sheet', { method: 'POST' });
-                    const sheetData = await sheetResp.json();
-                    if (sheetData && sheetData.spreadsheetId) {
-                        sheetId = sheetData.spreadsheetId;
-                    }
-                } catch (err) {
-                    console.warn('Could not create sheet before scraping', err);
+            try {
+                const sheetResp = await fetch('/scrape/create-sheet', { method: 'POST' });
+                const sheetData = await sheetResp.json();
+                if (sheetData && sheetData.spreadsheetId) {
+                    sheetId = sheetData.spreadsheetId;
                 }
+            } catch (err) {
+                console.warn('Could not create sheet before scraping', err);
             }
 
-            startScraping(keyword, source, enableEnrichment, destGoogleSheets, oneByOneProcessing, selectedDepartments, sheetId, destHubSpot);
+            startScraping(keyword, sources, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId);
         });
+
+        // Custom Modal Logic
+        const stopModal = document.getElementById('stopModal');
+        const confirmStopBtn = document.getElementById('confirmStop');
+        const cancelStopBtn = document.getElementById('cancelStop');
+
+        function openStopModal() {
+            stopModal.classList.add('active');
+        }
+
+        function closeStopModal() {
+            stopModal.classList.remove('active');
+        }
+
+        // Stop button trigger
+        stopButton.addEventListener('click', () => {
+            if (!isScraping) return;
+            openStopModal();
+        });
+
+        // Modal cancel
+        cancelStopBtn.addEventListener('click', closeStopModal);
+
+        // Modal outside click
+        stopModal.addEventListener('click', (e) => {
+            if (e.target === stopModal) closeStopModal();
+        });
+
+        // Modal confirm action
+        confirmStopBtn.addEventListener('click', async () => {
+            closeStopModal();
+            try {
+                const response = await fetch('/scrape/stop', { method: 'POST' });
+                const result = await response.json();
+                if (result.success) {
+                    appendLogEntry({ level: 'warning', timestamp: new Date(), message: 'Arrêt demandé par l\'utilisateur...', meta: {} });
+                    stopButton.disabled = true;
+                    stopButton.textContent = 'Arrêt en cours...';
+                }
+            } catch (err) {
+                console.error('Error stopping scrape', err);
+            }
+        });
+
 
         // Reset button
         resetButton.addEventListener('click', resetScrapingStatus);
 
-        async function startScraping(keyword, source, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId, destHubSpot) {
+        async function startScraping(keyword, sources, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId = null) {
             isScraping = true;
             button.disabled = true;
+            button.style.display = 'none';
+            stopButton.style.display = 'inline-block';
+            stopButton.disabled = false;
+            stopButton.textContent = 'Arrêter le processus';
             statusCard.classList.add('active');
-            
-            let statusText = enableEnrichment ? 
-                `Scraping ${keyword} depuis ${source} avec enrichissement…` : 
-                `Scraping ${keyword} depuis ${source}…`;
-            if (selectedDepartments.length > 0) statusText += ` (${selectedDepartments.length} départements)`;
-            
-            updateStatus('loading', 'Scraping en cours…', statusText);
+
+            let statusText = enableEnrichment ?
+                `Scraping ${keyword} from ${sources.join(', ')} with enrichment...` :
+                `Scraping ${keyword} from ${sources.join(', ')}...`;
+
+            if (selectedDepartments.length > 0) {
+                statusText += ` (${selectedDepartments.length} departments)`;
+            }
+
+            updateStatus('loading', 'Scraping in progress...', statusText);
             progressFill.style.width = '25%';
+
+            // Start log polling
             startLogPolling();
 
             try {
@@ -877,29 +1094,31 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    updateStatus('success', 'Scraping terminé !', 
-                        `${result.leadsCount} leads traités en ${result.processingTime}s`);
+                    const processingMode = oneByOneProcessing ? 'one by one' : 'in batch';
+                    updateStatus('success', 'Scraping completed!',
+                        `Found ${result.leadsCount} leads${result.enrichment ? ' with enrichment' : ''}${result.n8nSending ? ` and sent to n8n ${processingMode}` : ''}`);
                     progressFill.style.width = '100%';
-                    
+
                     leadsCount.textContent = result.leadsCount;
+                    sheetLink.href = result.spreadsheetUrl;
                     resultsSection.style.display = 'block';
 
-                    // Affichage résultats destinations
-                    showDestinationResults(result, enableN8nSending, destHubSpot);
-
-                    // Statistiques
-                    if (result.stats) showStatistics(result.stats);
-
+                    // Show detailed statistics
+                    if (result.stats) {
+                        showStatistics(result.stats);
+                    }
                 } else {
                     throw new Error(result.error);
                 }
 
             } catch (error) {
-                updateStatus('error', 'Scraping échoué', error.message);
+                updateStatus('error', 'Scraping failed', error.message);
                 progressFill.style.width = '0%';
             } finally {
                 isScraping = false;
                 button.disabled = false;
+                button.style.display = 'inline-block';
+                stopButton.style.display = 'none';
                 stopLogPolling();
             }
         }
@@ -964,6 +1183,9 @@
         }
 
         function showStatistics(stats) {
+            const container = document.getElementById('statisticsContainer');
+            if (!container) return;
+
             // Create statistics display
             const statsHtml = `
                 <div class="statistics-section">
@@ -1051,18 +1273,17 @@
             try {
                 const response = await fetch('/scrape/status');
                 const status = await response.json();
-                
                 if (status.isRunning) {
                     statusCard.classList.add('active');
                     updateStatus('loading', 'Scraping in progress...', `Scraping ${status.keyword} from ${status.source}...`);
                     progressFill.style.width = '50%';
                     button.disabled = true;
                     isScraping = true;
-                    
+
                     // Start log polling if scraping is running
                     startLogPolling();
                 }
-                
+
                 if (status.spreadsheetUrl) {
                     leadsCount.textContent = status.leadsCount;
                     sheetLink.href = status.spreadsheetUrl;

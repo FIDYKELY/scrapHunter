@@ -11,6 +11,28 @@ const fetch = require('node-fetch');
 const fs = require('fs');
 const path = require('path');
 
+// --- CANCELLATION STATE ---
+const cancelledBatches = new Set();
+// --------------------------
+
+/**
+ * Attente capable d'être interrompue
+ * Retourne true si annulé, false sinon
+ */
+async function cancellableSleep(ms, crawlBatchId) {
+  if (!crawlBatchId) {
+    await new Promise(r => setTimeout(r, ms));
+    return false;
+  }
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (cancelledBatches.has(crawlBatchId)) return true;
+    const remaining = ms - (Date.now() - start);
+    await new Promise(r => setTimeout(r, Math.min(1000, remaining)));
+  }
+  return cancelledBatches.has(crawlBatchId);
+}
+
 // ─────────────────────────────────────────────
 // LOGGER
 // ─────────────────────────────────────────────
@@ -22,8 +44,8 @@ const { logInfo, logWarning, logError } = require('../utils/logger');
 class RateLimiter {
   constructor(options = {}) {
     this.maxPerWindow = options.maxPerWindow || 50;
-    this.windowMs    = options.windowMs    || 60000;
-    this.requests    = [];
+    this.windowMs = options.windowMs || 60000;
+    this.requests = [];
   }
 
   async acquire(key) {
@@ -46,11 +68,10 @@ class RateLimiter {
 // CONFIGURATION
 // ─────────────────────────────────────────────
 const N8N_WEBHOOK_URL = process.env.N8N_WEBHOOK_URL || 'https://n8n.trouvezpourmoi.com/webhook/leads';
-
-const N8N_RATE_LIMITER     = new RateLimiter({ maxPerWindow: 50, windowMs: 60 * 1000 });
-const OSM_RATE_LIMITER     = new RateLimiter({ maxPerWindow:  5, windowMs: 60 * 1000 });
-const PJ_RATE_LIMITER      = new RateLimiter({ maxPerWindow: 15, windowMs: 60 * 60 * 1000 });
-const SOCIAL_RATE_LIMITER  = new RateLimiter({ maxPerWindow: 30, windowMs: 60 * 1000 });
+const N8N_RATE_LIMITER = new RateLimiter({ maxPerWindow: 50, windowMs: 60 * 1000 });
+const OSM_RATE_LIMITER = new RateLimiter({ maxPerWindow: 5, windowMs: 60 * 1000 });
+const PJ_RATE_LIMITER = new RateLimiter({ maxPerWindow: 15, windowMs: 60 * 60 * 1000 });
+const SOCIAL_RATE_LIMITER = new RateLimiter({ maxPerWindow: 30, windowMs: 60 * 1000 });
 
 // Per-domain limiters map (enrichissement site web)
 const domainLimiters = new Map();
@@ -86,95 +107,95 @@ const REAL_ESTATE_KEYWORDS = [
 ];
 
 const DEPARTEMENTS_FRANCE = [
-  '01','02','03','04','05','06','07','08','09','10',
-  '11','12','13','14','15','16','17','18','19','2A','2B',
-  '21','22','23','24','25','26','27','28','29','30',
-  '31','32','33','34','35','36','37','38','39','40',
-  '41','42','43','44','45','46','47','48','49','50',
-  '51','52','53','54','55','56','57','58','59','60',
-  '61','62','63','64','65','66','67','68','69','70',
-  '71','72','73','74','75','76','77','78','79','80',
-  '81','82','83','84','85','86','87','88','89','90',
-  '91','92','93','94','95','971','972','973','974','976'
+  '01', '02', '03', '04', '05', '06', '07', '08', '09', '10',
+  '11', '12', '13', '14', '15', '16', '17', '18', '19', '2A', '2B',
+  '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
+  '31', '32', '33', '34', '35', '36', '37', '38', '39', '40',
+  '41', '42', '43', '44', '45', '46', '47', '48', '49', '50',
+  '51', '52', '53', '54', '55', '56', '57', '58', '59', '60',
+  '61', '62', '63', '64', '65', '66', '67', '68', '69', '70',
+  '71', '72', '73', '74', '75', '76', '77', '78', '79', '80',
+  '81', '82', '83', '84', '85', '86', '87', '88', '89', '90',
+  '91', '92', '93', '94', '95', '971', '972', '973', '974', '976'
 ];
 
 // Mapping département → ville (format PagesJaunes, minuscules)
 const DEPT_VILLE_MAPPING = {
-  '01':'bourg-en-bresse','02':'laon','03':'moulins','04':'digne','05':'gap',
-  '06':'nice','07':'le-puy-en-velay','08':'charleville-mezieres','09':'foix','10':'troyes',
-  '11':'carcassonne','12':'rodez','13':'marseille','14':'caen','15':'aurillac',
-  '16':'angouleme','17':'la-rochelle','18':'bourges','19':'tulle','2A':'ajaccio',
-  '2B':'bastia','21':'dijon','22':'saint-brieuc','23':'gueret','24':'perigueux',
-  '25':'besancon','26':'valence','27':'evreux','28':'chartres','29':'quimper',
-  '30':'nimes','31':'toulouse','32':'auch','33':'bordeaux','34':'montpellier',
-  '35':'rennes','36':'chateauroux','37':'tours','38':'grenoble','39':'lons-le-saunier',
-  '40':'mont-de-marsan','41':'blois','42':'saint-etienne','43':'le-puy-en-velay','44':'nantes',
-  '45':'orleans','46':'cahors','47':'agen','48':'mende','49':'angers','50':'coutances',
-  '51':'chalon-en-champagne','52':'chaumont','53':'laval','54':'nancy','55':'bar-le-duc',
-  '56':'vannes','57':'metz','58':'nevers','59':'lille','60':'beauvais',
-  '61':'alencon','62':'lens','63':'clermont-ferrand','64':'pau','65':'tarbes',
-  '66':'perpignan','67':'strasbourg','68':'colmar','69':'lyon','70':'vesoul',
-  '71':'macon','72':'le-mans','73':'chambery','74':'annecy','75':'paris',
-  '76':'rouen','77':'melun','78':'versailles','79':'niort','80':'amiens',
-  '81':'albi','82':'montauban','83':'toulon','84':'avignon','85':'la-roche-sur-yon',
-  '86':'poitiers','87':'limoges','88':'epinal','89':'auxerre','90':'belfort',
-  '91':'evry','92':'nanterre','93':'bobigny','94':'creteil','95':'cergy-pontoise',
-  '971':'pointe-a-pitre','972':'fort-de-france','973':'cayenne','974':'saint-denis','976':'mamoudzou'
+  '01': 'bourg-en-bresse', '02': 'laon', '03': 'moulins', '04': 'digne', '05': 'gap',
+  '06': 'nice', '07': 'le-puy-en-velay', '08': 'charleville-mezieres', '09': 'foix', '10': 'troyes',
+  '11': 'carcassonne', '12': 'rodez', '13': 'marseille', '14': 'caen', '15': 'aurillac',
+  '16': 'angouleme', '17': 'la-rochelle', '18': 'bourges', '19': 'tulle', '2A': 'ajaccio',
+  '2B': 'bastia', '21': 'dijon', '22': 'saint-brieuc', '23': 'gueret', '24': 'perigueux',
+  '25': 'besancon', '26': 'valence', '27': 'evreux', '28': 'chartres', '29': 'quimper',
+  '30': 'nimes', '31': 'toulouse', '32': 'auch', '33': 'bordeaux', '34': 'montpellier',
+  '35': 'rennes', '36': 'chateauroux', '37': 'tours', '38': 'grenoble', '39': 'lons-le-saunier',
+  '40': 'mont-de-marsan', '41': 'blois', '42': 'saint-etienne', '43': 'le-puy-en-velay', '44': 'nantes',
+  '45': 'orleans', '46': 'cahors', '47': 'agen', '48': 'mende', '49': 'angers', '50': 'coutances',
+  '51': 'chalon-en-champagne', '52': 'chaumont', '53': 'laval', '54': 'nancy', '55': 'bar-le-duc',
+  '56': 'vannes', '57': 'metz', '58': 'nevers', '59': 'lille', '60': 'beauvais',
+  '61': 'alencon', '62': 'lens', '63': 'clermont-ferrand', '64': 'pau', '65': 'tarbes',
+  '66': 'perpignan', '67': 'strasbourg', '68': 'colmar', '69': 'lyon', '70': 'vesoul',
+  '71': 'macon', '72': 'le-mans', '73': 'chambery', '74': 'annecy', '75': 'paris',
+  '76': 'rouen', '77': 'melun', '78': 'versailles', '79': 'niort', '80': 'amiens',
+  '81': 'albi', '82': 'montauban', '83': 'toulon', '84': 'avignon', '85': 'la-roche-sur-yon',
+  '86': 'poitiers', '87': 'limoges', '88': 'epinal', '89': 'auxerre', '90': 'belfort',
+  '91': 'evry', '92': 'nanterre', '93': 'bobigny', '94': 'creteil', '95': 'cergy-pontoise',
+  '971': 'pointe-a-pitre', '972': 'fort-de-france', '973': 'cayenne', '974': 'saint-denis', '976': 'mamoudzou'
 };
 
 // Bounding boxes des départements (format: sud,ouest,nord,est)
 const DEPT_BBOX = {
-  '75':'48.815,2.224,48.902,2.470','92':'48.755,2.145,48.945,2.305',
-  '93':'48.815,2.315,49.015,2.575','94':'48.725,2.325,48.895,2.515',
-  '95':'48.795,1.875,49.175,2.485','77':'48.345,2.415,48.985,3.215',
-  '78':'48.595,1.785,48.995,2.245','91':'48.425,1.985,48.735,2.555',
-  '69':'45.715,4.685,45.815,4.915','13':'43.175,5.215,43.375,5.525',
-  '31':'43.515,1.325,43.665,1.555','33':'44.765,-0.685,44.925,-0.465',
-  '59':'50.575,2.885,50.755,3.175','06':'43.615,7.105,43.775,7.335',
-  '34':'43.395,3.045,43.735,3.925','44':'47.125,-2.415,47.475,-1.345',
-  '35':'47.985,-2.245,48.715,-1.425','38':'45.015,5.425,45.945,6.025',
-  '57':'48.845,6.045,49.535,7.435','67':'48.445,7.345,49.125,8.235',
-  '68':'47.445,6.845,48.275,7.525','83':'43.025,5.885,43.425,6.415',
-  '30':'43.475,2.985,44.305,4.635','29':'47.625,-4.795,48.535,-2.885',
-  '22':'48.285,-3.245,48.765,-1.945','56':'47.375,-3.445,47.965,-2.025',
-  '85':'46.265,-1.845,46.945,-0.875','49':'47.025,-0.965,47.845,0.285',
-  '72':'47.945,0.045,48.525,0.945','71':'46.265,3.545,47.145,5.365',
-  '42':'45.415,3.825,46.045,4.945','73':'45.025,5.645,45.845,6.825',
-  '74':'45.795,5.845,46.225,6.925','01':'45.765,4.745,46.345,5.825',
-  '02':'48.845,2.985,49.925,4.245','03':'46.025,2.645,46.825,3.625',
-  '04':'43.845,5.725,44.425,6.545','05':'44.425,5.845,45.345,6.825',
-  '07':'44.425,3.845,45.245,4.825','08':'49.245,3.845,50.125,5.425',
-  '09':'42.725,1.445,43.245,2.825','10':'47.845,3.845,48.625,4.825',
-  '11':'42.945,1.845,43.425,3.025','12':'44.025,1.845,44.825,3.025',
-  '14':'48.845,-0.945,49.425,0.425','15':'44.725,1.845,45.425,3.025',
-  '16':'45.025,-0.445,45.825,0.425','17':'45.845,-1.245,46.245,0.425',
-  '18':'46.845,1.845,47.625,3.025','19':'45.025,1.445,45.825,2.825',
-  '2A':'41.725,8.445,42.625,9.425','2B':'42.245,8.845,43.025,9.825',
-  '21':'47.025,3.845,47.825,5.025','23':'45.845,1.445,46.425,2.825',
-  '24':'44.725,0.445,45.425,1.825','25':'46.845,5.845,47.625,7.025',
-  '26':'44.425,4.445,45.245,5.825','27':'48.425,0.445,49.225,1.825',
-  '28':'48.025,0.845,48.825,2.025','32':'42.845,0.045,43.625,1.425',
-  '36':'46.025,0.845,46.825,2.025','37':'46.845,0.045,47.625,1.425',
-  '39':'46.025,4.845,46.825,6.025','40':'43.425,-1.445,44.225,0.045',
-  '41':'47.425,0.845,48.225,2.025','43':'44.845,2.845,45.625,4.025',
-  '45':'47.425,1.845,48.225,3.025','46':'44.025,1.445,44.825,2.825',
-  '47':'44.025,-0.445,44.825,1.425','48':'44.025,2.845,44.825,4.025',
-  '50':'48.845,-1.945,49.625,-0.845','51':'48.425,3.445,49.225,5.025',
-  '52':'47.425,4.845,48.225,6.025','53':'47.425,-0.945,48.225,0.425',
-  '54':'48.425,5.445,49.225,7.025','55':'48.425,4.845,49.225,6.025',
-  '58':'46.845,2.845,47.625,4.025','60':'49.025,1.845,49.825,3.025',
-  '61':'48.425,-0.445,49.225,1.425','62':'50.425,1.445,51.225,4.025',
-  '63':'45.425,2.445,46.225,3.825','64':'42.845,-1.445,43.625,0.425',
-  '65':'42.845,0.045,43.625,1.425','66':'42.425,1.845,43.225,3.025',
-  '70':'47.425,5.445,48.225,6.625','76':'49.025,0.445,49.825,1.825',
-  '79':'46.425,-0.445,47.225,0.425','80':'49.425,1.845,50.225,3.025',
-  '81':'43.425,1.445,44.225,2.825','82':'43.845,0.845,44.625,2.025',
-  '84':'43.625,4.445,44.425,5.825','86':'46.025,0.045,46.825,1.425',
-  '87':'45.425,0.845,46.225,2.025','88':'48.025,5.445,48.825,6.625',
-  '89':'47.425,2.845,48.225,4.025','90':'47.425,6.445,48.225,7.625',
-  '971':'15.845,-61.845,16.445,-60.845','972':'14.345,-61.245,14.845,-60.445',
-  '973':'3.845,-54.445,5.845,-51.445','974':'20.845,55.245,21.245,55.845',
-  '976':'12.645,45.045,12.945,45.445'
+  '75': '48.815,2.224,48.902,2.470', '92': '48.755,2.145,48.945,2.305',
+  '93': '48.815,2.315,49.015,2.575', '94': '48.725,2.325,48.895,2.515',
+  '95': '48.795,1.875,49.175,2.485', '77': '48.345,2.415,48.985,3.215',
+  '78': '48.595,1.785,48.995,2.245', '91': '48.425,1.985,48.735,2.555',
+  '69': '45.715,4.685,45.815,4.915', '13': '43.175,5.215,43.375,5.525',
+  '31': '43.515,1.325,43.665,1.555', '33': '44.765,-0.685,44.925,-0.465',
+  '59': '50.575,2.885,50.755,3.175', '06': '43.615,7.105,43.775,7.335',
+  '34': '43.395,3.045,43.735,3.925', '44': '47.125,-2.415,47.475,-1.345',
+  '35': '47.985,-2.245,48.715,-1.425', '38': '45.015,5.425,45.945,6.025',
+  '57': '48.845,6.045,49.535,7.435', '67': '48.445,7.345,49.125,8.235',
+  '68': '47.445,6.845,48.275,7.525', '83': '43.025,5.885,43.425,6.415',
+  '30': '43.475,2.985,44.305,4.635', '29': '47.625,-4.795,48.535,-2.885',
+  '22': '48.285,-3.245,48.765,-1.945', '56': '47.375,-3.445,47.965,-2.025',
+  '85': '46.265,-1.845,46.945,-0.875', '49': '47.025,-0.965,47.845,0.285',
+  '72': '47.945,0.045,48.525,0.945', '71': '46.265,3.545,47.145,5.365',
+  '42': '45.415,3.825,46.045,4.945', '73': '45.025,5.645,45.845,6.825',
+  '74': '45.795,5.845,46.225,6.925', '01': '45.765,4.745,46.345,5.825',
+  '02': '48.845,2.985,49.925,4.245', '03': '46.025,2.645,46.825,3.625',
+  '04': '43.845,5.725,44.425,6.545', '05': '44.425,5.845,45.345,6.825',
+  '07': '44.425,3.845,45.245,4.825', '08': '49.245,3.845,50.125,5.425',
+  '09': '42.725,1.445,43.245,2.825', '10': '47.845,3.845,48.625,4.825',
+  '11': '42.945,1.845,43.425,3.025', '12': '44.025,1.845,44.825,3.025',
+  '14': '48.845,-0.945,49.425,0.425', '15': '44.725,1.845,45.425,3.025',
+  '16': '45.025,-0.445,45.825,0.425', '17': '45.845,-1.245,46.245,0.425',
+  '18': '46.845,1.845,47.625,3.025', '19': '45.025,1.445,45.825,2.825',
+  '2A': '41.725,8.445,42.625,9.425', '2B': '42.245,8.845,43.025,9.825',
+  '21': '47.025,3.845,47.825,5.025', '23': '45.845,1.445,46.425,2.825',
+  '24': '44.725,0.445,45.425,1.825', '25': '46.845,5.845,47.625,7.025',
+  '26': '44.425,4.445,45.245,5.825', '27': '48.425,0.445,49.225,1.825',
+  '28': '48.025,0.845,48.825,2.025', '32': '42.845,0.045,43.625,1.425',
+  '36': '46.025,0.845,46.825,2.025', '37': '46.845,0.045,47.625,1.425',
+  '39': '46.025,4.845,46.825,6.025', '40': '43.425,-1.445,44.225,0.045',
+  '41': '47.425,0.845,48.225,2.025', '43': '44.845,2.845,45.625,4.025',
+  '45': '47.425,1.845,48.225,3.025', '46': '44.025,1.445,44.825,2.825',
+  '47': '44.025,-0.445,44.825,1.425', '48': '44.025,2.845,44.825,4.025',
+  '50': '48.845,-1.945,49.625,-0.845', '51': '48.425,3.445,49.225,5.025',
+  '52': '47.425,4.845,48.225,6.025', '53': '47.425,-0.945,48.225,0.425',
+  '54': '48.425,5.445,49.225,7.025', '55': '48.425,4.845,49.225,6.025',
+  '58': '46.845,2.845,47.625,4.025', '60': '49.025,1.845,49.825,3.025',
+  '61': '48.425,-0.445,49.225,1.425', '62': '50.425,1.445,51.225,4.025',
+  '63': '45.425,2.445,46.225,3.825', '64': '42.845,-1.445,43.625,0.425',
+  '65': '42.845,0.045,43.625,1.425', '66': '42.425,1.845,43.225,3.025',
+  '70': '47.425,5.445,48.225,6.625', '76': '49.025,0.445,49.825,1.825',
+  '79': '46.425,-0.445,47.225,0.425', '80': '49.425,1.845,50.225,3.025',
+  '81': '43.425,1.445,44.225,2.825', '82': '43.845,0.845,44.625,2.025',
+  '84': '43.625,4.445,44.425,5.825', '86': '46.025,0.045,46.825,1.425',
+  '87': '45.425,0.845,46.225,2.025', '88': '48.025,5.445,48.825,6.625',
+  '89': '47.425,2.845,48.225,4.025', '90': '47.425,6.445,48.225,7.625',
+  '971': '15.845,-61.845,16.445,-60.845', '972': '14.345,-61.245,14.845,-60.445',
+  '973': '3.845,-54.445,5.845,-51.445', '974': '20.845,55.245,21.245,55.845',
+  '976': '12.645,45.045,12.945,45.445'
 };
 
 // Emails patterns
@@ -224,14 +245,14 @@ function extractDomain(website) {
 function isDirectEmail(email) {
   if (!email) return false;
   const lower = email.toLowerCase();
-  const generic = ['contact@','info@','hello@','agency@','service@'];
+  const generic = ['contact@', 'info@', 'hello@', 'agency@', 'service@'];
   return !generic.some(p => lower.startsWith(p));
 }
 
 function isGenericEmail(email) {
   if (!email) return false;
   const lower = email.toLowerCase();
-  const generic = ['contact@','info@','hello@','agency@','service@'];
+  const generic = ['contact@', 'info@', 'hello@', 'agency@', 'service@'];
   return generic.some(p => lower.startsWith(p));
 }
 
@@ -239,7 +260,7 @@ function isMobilePhone(phone) {
   if (!phone) return false;
   const digits = phone.replace(/[^\d]/g, '');
   return /^0[67]\d{8}$/.test(digits) ||
-         /^(\+33|0033)[67]\d{8}$/.test(phone.replace(/[^\d+]/g, ''));
+    /^(\+33|0033)[67]\d{8}$/.test(phone.replace(/[^\d+]/g, ''));
 }
 
 function calculateScore(lead) {
@@ -274,7 +295,7 @@ function calculateScore(lead) {
   }
 
   // 5. Réseaux sociaux (10 pts max)
-  if (lead.facebook_url)  { score += 5; reasons.push('Facebook'); }
+  if (lead.facebook_url) { score += 5; reasons.push('Facebook'); }
   if (lead.instagram_url) { score += 5; reasons.push('Instagram'); }
 
   // 6. Site web (5 pts)
@@ -373,10 +394,10 @@ async function executeOverpassQuery(query, serverIndex = 0) {
 function buildAddressFromTags(tags) {
   const parts = [];
   if (tags['addr:housenumber']) parts.push(tags['addr:housenumber']);
-  if (tags['addr:street'])      parts.push(tags['addr:street']);
-  if (tags['addr:postcode'])    parts.push(tags['addr:postcode']);
-  if (tags['addr:city'])        parts.push(tags['addr:city']);
-  else if (tags['addr:place'])  parts.push(tags['addr:place']);
+  if (tags['addr:street']) parts.push(tags['addr:street']);
+  if (tags['addr:postcode']) parts.push(tags['addr:postcode']);
+  if (tags['addr:city']) parts.push(tags['addr:city']);
+  else if (tags['addr:place']) parts.push(tags['addr:place']);
   return parts.join(', ');
 }
 
@@ -384,39 +405,39 @@ function buildLeadFromOsmResult(element, dept, crawlBatchId) {
   const tags = element.tags || {};
   let lat = null, lng = null;
   if (element.lat && element.lon) { lat = element.lat; lng = element.lon; }
-  else if (element.center)        { lat = element.center.lat; lng = element.center.lon; }
+  else if (element.center) { lat = element.center.lat; lng = element.center.lon; }
 
-  const nom_entreprise       = tags.name || tags.operator || tags.brand || 'Agence immobilière';
-  const telephone            = formatPhoneForSheets(tags.phone || tags['contact:phone'] || null);
-  const site_web             = tags.website || tags['contact:website'] || null;
-  const email                = normalizeEmail(tags.email || tags['contact:email'] || null);
-  const facebook_url         = tags['contact:facebook'] || tags.facebook || null;
-  const instagram_url        = tags['contact:instagram'] || tags.instagram || null;
+  const nom_entreprise = tags.name || tags.operator || tags.brand || 'Agence immobilière';
+  const telephone = formatPhoneForSheets(tags.phone || tags['contact:phone'] || null);
+  const site_web = tags.website || tags['contact:website'] || null;
+  const email = normalizeEmail(tags.email || tags['contact:email'] || null);
+  const facebook_url = tags['contact:facebook'] || tags.facebook || null;
+  const instagram_url = tags['contact:instagram'] || tags.instagram || null;
   const linkedin_company_url = tags['contact:linkedin'] || tags.linkedin || null;
-  const adresse_complete     = buildAddressFromTags(tags);
-  const code_postal          = tags['addr:postcode'] || null;
-  const ville                = tags['addr:city'] || tags['addr:place'] || null;
-  const source_url           = `https://www.openstreetmap.org/${element.type}/${element.id}`;
-  const phone_norm           = normalizePhone(tags.phone || tags['contact:phone'] || '');
-  const domain_norm          = site_web ? normalizeDomain(site_web) : '';
-  const name_city_norm       = normalizeNameCity(nom_entreprise, adresse_complete);
+  const adresse_complete = buildAddressFromTags(tags);
+  const code_postal = tags['addr:postcode'] || null;
+  const ville = tags['addr:city'] || tags['addr:place'] || null;
+  const source_url = `https://www.openstreetmap.org/${element.type}/${element.id}`;
+  const phone_norm = normalizePhone(tags.phone || tags['contact:phone'] || '');
+  const domain_norm = site_web ? normalizeDomain(site_web) : '';
+  const name_city_norm = normalizeNameCity(nom_entreprise, adresse_complete);
 
   let type_profil = 'AGENCE';
-  const name     = (tags.name     || '').toLowerCase();
+  const name = (tags.name || '').toLowerCase();
   const operator = (tags.operator || '').toLowerCase();
   if (name.includes('orpi') || name.includes('century 21') || name.includes('laforêt') ||
-      name.includes('guy hoquet') || name.includes('era') || name.includes('fnaim') ||
-      operator.includes('orpi') || operator.includes('century 21')) {
+    name.includes('guy hoquet') || name.includes('era') || name.includes('fnaim') ||
+    operator.includes('orpi') || operator.includes('century 21')) {
     type_profil = 'AGENCE_RESEAU';
   }
   if (name.includes('indépendant') || name.includes('independant') ||
-      operator.includes('indépendant') || operator.includes('independant')) {
+    operator.includes('indépendant') || operator.includes('independant')) {
     type_profil = 'INDEPENDANT';
   }
 
   const missing = [];
   if (!tags.phone && !tags['contact:phone']) missing.push('telephone');
-  if (!email)   missing.push('email');
+  if (!email) missing.push('email');
   if (!site_web) missing.push('site_web');
 
   let data_quality = 'LOW';
@@ -457,7 +478,7 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
       const bbox = getDepartmentBbox(dept);
       let bboxes = [bbox];
 
-      if (['13','69','59','75','92','93','94'].includes(dept)) {
+      if (['13', '69', '59', '75', '92', '93', '94'].includes(dept)) {
         bboxes = splitDepartmentBbox(bbox, 4);
         logInfo(`Département ${dept} divisé en ${bboxes.length} zones`);
       }
@@ -471,7 +492,7 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
           try {
             logInfo(`Requête Overpass dept=${dept} zone ${i + 1}/${bboxes.length}`);
             const query = buildOverpassQuery(zoneBbox);
-            const data  = await executeOverpassQuery(query);
+            const data = await executeOverpassQuery(query);
             if (data.elements && data.elements.length > 0) {
               totalElements = totalElements.concat(data.elements);
               logInfo(`Zone ${i + 1}/${bboxes.length}: ${data.elements.length} éléments`);
@@ -490,7 +511,15 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
             }
           }
         }
-        if (i < bboxes.length - 1) await new Promise(r => setTimeout(r, 15000));
+        if (cancelledBatches.has(crawlBatchId)) break;
+        if (i < bboxes.length - 1) {
+          if (await cancellableSleep(15000, crawlBatchId)) break;
+        }
+      }
+
+      if (cancelledBatches.has(crawlBatchId)) {
+        logWarning(`🛑 Scraping OSM pour le département ${dept} annulé.`);
+        return [];
       }
 
       const leads = [];
@@ -513,7 +542,7 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
       retryCount++;
       logError(`Erreur dept ${dept} OSM (tentative ${retryCount}/${maxRetries}): ${error.message}`);
       if (retryCount >= maxRetries) return [];
-      await new Promise(r => setTimeout(r, 30000 * retryCount));
+      await cancellableSleep(30000 * retryCount, crawlBatchId);
     }
   }
   return [];
@@ -526,13 +555,17 @@ async function scrapeOpenStreetMap(departments = DEPARTEMENTS_FRANCE, crawlBatch
   logInfo('Début scraping OpenStreetMap', { depts: departments });
   const allLeads = [];
   for (let i = 0; i < departments.length; i++) {
+    if (cancelledBatches.has(crawlBatchId)) {
+      logWarning(`🛑 Scraping OpenStreetMap annulé pour le batch ${crawlBatchId}`);
+      break;
+    }
     const dept = departments[i];
     const leads = await scrapeDepartmentOSM(dept, crawlBatchId);
     allLeads.push(...leads);
     if (i < departments.length - 1) {
       const delay = 30000 + Math.random() * 30000;
       logInfo(`Pause entre départements: ${Math.round(delay)}ms`);
-      await new Promise(r => setTimeout(r, delay));
+      if (await cancellableSleep(delay, crawlBatchId)) break;
     }
   }
   logInfo(`Scraping OSM terminé: ${allLeads.length} leads`);
@@ -542,7 +575,9 @@ async function scrapeOpenStreetMap(departments = DEPARTEMENTS_FRANCE, crawlBatch
 // ─────────────────────────────────────────────
 // PAGESJAUNES — détail d'agence
 // ─────────────────────────────────────────────
-async function scrapeAgencyDetail(url) {
+async function scrapeAgencyDetail(url, crawlBatchId) {
+  if (crawlBatchId && cancelledBatches.has(crawlBatchId)) return null;
+
   const browser = await puppeteer.launch({
     headless: 'new',
     args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -579,7 +614,7 @@ async function scrapeAgencyDetail(url) {
       };
 
       // 1. Nom
-      const titleSelectors = ['h1[class*="denomination"]','.denomination','h1','[class*="company-name"]'];
+      const titleSelectors = ['h1[class*="denomination"]', '.denomination', 'h1', '[class*="company-name"]'];
       for (const sel of titleSelectors) {
         const el = document.querySelector(sel);
         if (el) { result.nom_entreprise = el.textContent.trim(); break; }
@@ -637,8 +672,8 @@ async function scrapeAgencyDetail(url) {
       document.querySelectorAll('a[href]').forEach(link => {
         const href = link.href.toLowerCase();
         if (href.includes('facebook.com/') && !href.includes('share')) result.facebook_url = link.href;
-        else if (href.includes('instagram.com/'))          result.instagram_url = link.href;
-        else if (href.includes('linkedin.com/company/'))   result.linkedin_company_url = link.href;
+        else if (href.includes('instagram.com/')) result.instagram_url = link.href;
+        else if (href.includes('linkedin.com/company/')) result.linkedin_company_url = link.href;
       });
 
       // 7. Tags
@@ -674,10 +709,10 @@ async function scrapeAgencyDetail(url) {
 
 function buildLeadFromPagesJaunesDetail(details, dept, crawlBatchId, sourceUrl = '') {
   const telephone = formatPhoneForSheets(details.telephone);
-  const tags      = (details.tags || []).join(' ').toLowerCase();
+  const tags = (details.tags || []).join(' ').toLowerCase();
   let type_profil = 'AGENCE';
   if (tags.includes('orpi') || tags.includes('century 21') || tags.includes('laforêt') ||
-      tags.includes('guy hoquet') || tags.includes('era') || tags.includes('fnaim')) {
+    tags.includes('guy hoquet') || tags.includes('era') || tags.includes('fnaim')) {
     type_profil = 'AGENCE_RESEAU';
   }
   if (tags.includes('indépendant') || tags.includes('independant')) type_profil = 'INDEPENDANT';
@@ -723,12 +758,17 @@ function buildLeadFromPagesJaunesDetail(details, dept, crawlBatchId, sourceUrl =
  */
 async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
   const { maxPagesPerDept = 1 } = options;
-  const targetDepts = departments.length > 0 ? departments : ['75','69','13','31','06','92','93','94'];
+  const targetDepts = departments.length > 0 ? departments : ['75', '69', '13', '31', '06', '92', '93', '94'];
 
   logInfo(`PagesJaunes — ${targetDepts.length} département(s)`, { depts: targetDepts });
   const allLeads = [];
 
   for (const dept of targetDepts) {
+    if (cancelledBatches.has(crawlBatchId)) {
+      logWarning(`🛑 Scraping PagesJaunes annulé pour le batch ${crawlBatchId}`);
+      break;
+    }
+
     const browser = await puppeteer.launch({
       headless: 'new',
       args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -739,7 +779,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
       let baseUrl;
-      if (dept === '75')      baseUrl = 'https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=paris-75';
+      if (dept === '75') baseUrl = 'https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=paris-75';
       else if (dept === '69') baseUrl = 'https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=lyon-69';
       else if (dept === '13') baseUrl = 'https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=marseille-13';
       else {
@@ -747,10 +787,15 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
         baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=${city}-${dept}`;
       }
 
-      let pageNum     = 1;
+      let pageNum = 1;
       let hasNextPage = true;
 
       while (pageNum <= maxPagesPerDept && hasNextPage) {
+        if (cancelledBatches.has(crawlBatchId)) {
+          logWarning(`🛑 Scraping PagesJaunes annulé au milieu pour le batch ${crawlBatchId}`);
+          break;
+        }
+
         const pageUrl = pageNum === 1 ? baseUrl : `${baseUrl}&page=${pageNum}`;
         logInfo(`PagesJaunes dept=${dept} page=${pageNum}`, { url: pageUrl });
 
@@ -763,15 +808,15 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
             await page.waitForSelector('.bi-list, .bi-liste, li[id^="bi-"]', { timeout: 10000 });
           } catch (_) { logWarning(`Timeout .bi-list dept=${dept}`); }
 
-          await new Promise(r => setTimeout(r, 2000));
+          if (await cancellableSleep(2000, crawlBatchId)) throw new Error('CANCELLED');
 
           // Récupérer les liens des fiches
           const listingItems = await page.evaluate(() => {
             const items = [];
             document.querySelectorAll('li[id^="bi-"]').forEach(item => {
               if (item.classList.contains('pjts_pub-bloc')) return;
-              const linkEl    = item.querySelector('a.bi-denomination');
-              const relUrl    = linkEl ? linkEl.getAttribute('href') : null;
+              const linkEl = item.querySelector('a.bi-denomination');
+              const relUrl = linkEl ? linkEl.getAttribute('href') : null;
               const nomApercu = item.querySelector('h3')?.textContent?.trim() || null;
               if (relUrl && !relUrl.startsWith('#')) {
                 items.push({ source_url: new URL(relUrl, window.location.origin).href, nom_apercu: nomApercu });
@@ -783,8 +828,10 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
           logInfo(`dept=${dept} page=${pageNum}: ${listingItems.length} agences trouvées`);
 
           for (const item of listingItems) {
+            if (cancelledBatches.has(crawlBatchId)) break;
+
             logInfo(`Traitement: ${item.nom_apercu} — ${item.source_url}`);
-            const details = await scrapeAgencyDetail(item.source_url);
+            const details = await scrapeAgencyDetail(item.source_url, crawlBatchId);
             if (details) {
               const lead = buildLeadFromPagesJaunesDetail(details, dept, crawlBatchId, item.source_url);
               allLeads.push(lead);
@@ -795,7 +842,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
               });
             }
             // Pause aléatoire entre les fiches
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+            if (await cancellableSleep(2000 + Math.random() * 3000, crawlBatchId)) break;
           }
 
           hasNextPage = await page.evaluate(() => !!document.querySelector('a#pagination-next, a.next'));
@@ -807,7 +854,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
         }
 
         if (pageNum <= maxPagesPerDept) {
-          await new Promise(r => setTimeout(r, 15000 + Math.random() * 15000));
+          if (await cancellableSleep(15000 + Math.random() * 15000, crawlBatchId)) break;
         }
       }
     } catch (err) {
@@ -871,28 +918,28 @@ async function scrapePageForContacts(url) {
         const href = a.href.toLowerCase();
         if (href.includes('facebook.com/') && !href.includes('share') && !href.includes('sharer'))
           r.social.facebook = a.href;
-        else if (href.includes('instagram.com/'))        r.social.instagram = a.href;
-        else if (href.includes('linkedin.com/company/')) r.social.linkedin  = a.href;
+        else if (href.includes('instagram.com/')) r.social.instagram = a.href;
+        else if (href.includes('linkedin.com/company/')) r.social.linkedin = a.href;
       });
 
       // Formulaire de contact
       r.contactForm = Array.from(document.querySelectorAll('form')).some(form => {
-        const html   = form.outerHTML.toLowerCase();
+        const html = form.outerHTML.toLowerCase();
         const action = form.getAttribute('action') || '';
         return html.includes('email') || html.includes('message') || html.includes('contact') ||
-               action.toLowerCase().includes('contact') ||
-               !!form.querySelector('input[type="email"]') ||
-               !!form.querySelector('textarea[name*="message"]') ||
-               !!form.querySelector('input[name*="email"]') ||
-               !!form.querySelector('button[type="submit"]');
+          action.toLowerCase().includes('contact') ||
+          !!form.querySelector('input[type="email"]') ||
+          !!form.querySelector('textarea[name*="message"]') ||
+          !!form.querySelector('input[name*="email"]') ||
+          !!form.querySelector('button[type="submit"]');
       });
 
       // Page de contact
-      const url2  = window.location.href.toLowerCase();
+      const url2 = window.location.href.toLowerCase();
       const title = document.title.toLowerCase();
-      const h1    = document.querySelector('h1')?.textContent.toLowerCase() || '';
+      const h1 = document.querySelector('h1')?.textContent.toLowerCase() || '';
       if (url2.includes('contact') || title.includes('contact') || h1.includes('contact') ||
-          h1.includes('nous contacter') || h1.includes('contactez')) {
+        h1.includes('nous contacter') || h1.includes('contactez')) {
         r.contactPage = window.location.href;
       }
 
@@ -915,7 +962,7 @@ async function enrichWebsite(lead) {
   const site = lead.site_web.startsWith('http') ? lead.site_web : `https://${lead.site_web}`;
 
   try {
-    const domain  = new URL(site).hostname;
+    const domain = new URL(site).hostname;
     const limiter = getDomainLimiter(domain);
     await limiter.acquire(domain);
 
@@ -932,7 +979,7 @@ async function enrichWebsite(lead) {
     } catch (err) { logWarning(`Impossible d'ouvrir ${site}: ${err.message}`); }
 
     // 2) Pages prioritaires
-    const PRIORITY_PATHS = ['/contact','/contactez-nous','/nous-contacter','/mentions-legales','/about','/a-propos'];
+    const PRIORITY_PATHS = ['/contact', '/contactez-nous', '/nous-contacter', '/mentions-legales', '/about', '/a-propos'];
     const origin = new URL(site).origin;
     for (const p of PRIORITY_PATHS) {
       if (enrichment.emails.length > 0 && enrichment.contactForm) break;
@@ -955,9 +1002,9 @@ async function enrichWebsite(lead) {
     }
     if (enrichment.contactPage) { lead.url_contact_page = enrichment.contactPage; logInfo(`✅ Page contact: ${enrichment.contactPage}`); }
     if (enrichment.contactForm) { lead.url_contact_form = origin; logInfo(`✅ Formulaire contact trouvé`); }
-    if (enrichment.social.facebook  && !lead.facebook_url)         { lead.facebook_url         = enrichment.social.facebook; }
-    if (enrichment.social.instagram && !lead.instagram_url)        { lead.instagram_url        = enrichment.social.instagram; }
-    if (enrichment.social.linkedin  && !lead.linkedin_company_url) { lead.linkedin_company_url = enrichment.social.linkedin; }
+    if (enrichment.social.facebook && !lead.facebook_url) { lead.facebook_url = enrichment.social.facebook; }
+    if (enrichment.social.instagram && !lead.instagram_url) { lead.instagram_url = enrichment.social.instagram; }
+    if (enrichment.social.linkedin && !lead.linkedin_company_url) { lead.linkedin_company_url = enrichment.social.linkedin; }
 
     if (lead.telephone) lead.phone_norm = normalizePhone(lead.telephone);
     lead.domain_norm = normalizeDomain(lead.site_web);
@@ -996,7 +1043,7 @@ async function extractSocialFromWebsite(website) {
   const social = { linkedin: null, facebook: null, instagram: null };
   try {
     await SOCIAL_RATE_LIMITER.acquire('website');
-    const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox','--disable-setuid-sandbox'] });
+    const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     try {
       const page = await browser.newPage();
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
@@ -1009,8 +1056,8 @@ async function extractSocialFromWebsite(website) {
           const href = a.href.toLowerCase();
           if (href.includes('facebook.com/') && !href.includes('share') && !href.includes('sharer'))
             s.facebook = a.href;
-          if (href.includes('instagram.com/'))        s.instagram = a.href;
-          if (href.includes('linkedin.com/company/')) s.linkedin  = a.href;
+          if (href.includes('instagram.com/')) s.instagram = a.href;
+          if (href.includes('linkedin.com/company/')) s.linkedin = a.href;
         });
         return s;
       });
@@ -1050,22 +1097,22 @@ async function enrichSocial(lead) {
 
     if (lead.site_web && lead.site_web !== '#') {
       const s = await extractSocialFromWebsite(lead.site_web);
-      if (s.linkedin  && !lead.linkedin_company_url) { lead.linkedin_company_url = s.linkedin; }
-      if (s.facebook  && !lead.facebook_url)         { lead.facebook_url         = s.facebook; }
-      if (s.instagram && !lead.instagram_url)        { lead.instagram_url        = s.instagram; }
+      if (s.linkedin && !lead.linkedin_company_url) { lead.linkedin_company_url = s.linkedin; }
+      if (s.facebook && !lead.facebook_url) { lead.facebook_url = s.facebook; }
+      if (s.instagram && !lead.instagram_url) { lead.instagram_url = s.instagram; }
     }
 
     if (!lead.linkedin_company_url || !lead.facebook_url || !lead.instagram_url) {
       const api = await searchWithFreeApis(lead);
-      if (api.linkedin  && !lead.linkedin_company_url) lead.linkedin_company_url = api.linkedin;
-      if (api.facebook  && !lead.facebook_url)         lead.facebook_url         = api.facebook;
-      if (api.instagram && !lead.instagram_url)        lead.instagram_url        = api.instagram;
+      if (api.linkedin && !lead.linkedin_company_url) lead.linkedin_company_url = api.linkedin;
+      if (api.facebook && !lead.facebook_url) lead.facebook_url = api.facebook;
+      if (api.instagram && !lead.instagram_url) lead.instagram_url = api.instagram;
     }
 
     logInfo(`✅ Réseaux enrichis: ${lead.nom_entreprise}`, {
-      linkedin:  lead.linkedin_company_url ? '✓' : '✗',
-      facebook:  lead.facebook_url         ? '✓' : '✗',
-      instagram: lead.instagram_url        ? '✓' : '✗'
+      linkedin: lead.linkedin_company_url ? '✓' : '✗',
+      facebook: lead.facebook_url ? '✓' : '✗',
+      instagram: lead.instagram_url ? '✓' : '✗'
     });
     return lead;
   } catch (error) {
@@ -1142,16 +1189,16 @@ async function sendToN8n(lead, sheetId = null) {
 // DONNÉES DE TEST (fallback)
 // ─────────────────────────────────────────────
 function generateTestData(keyword, count = 5) {
-  const departments = ['75','92','93','94','69','13','31','33'];
+  const departments = ['75', '92', '93', '94', '69', '13', '31', '33'];
   const DISPLAY_CITIES = {
-    '75':'Paris','92':'Nanterre','93':'Bobigny','94':'Créteil',
-    '69':'Lyon','13':'Marseille','31':'Toulouse','33':'Bordeaux'
+    '75': 'Paris', '92': 'Nanterre', '93': 'Bobigny', '94': 'Créteil',
+    '69': 'Lyon', '13': 'Marseille', '31': 'Toulouse', '33': 'Bordeaux'
   };
   const leads = [];
   for (let i = 0; i < count; i++) {
     const dept = departments[i % departments.length];
     const city = DISPLAY_CITIES[dept] || dept;
-    const tel  = formatPhoneForSheets(`0${i + 1}${String(i).repeat(8)}`);
+    const tel = formatPhoneForSheets(`0${i + 1}${String(i).repeat(8)}`);
     leads.push({
       lead_id: uuidv4(),
       source: 'TEST_DATA',
@@ -1194,9 +1241,14 @@ function generateTestData(keyword, count = 5) {
 async function processLead(lead, options = {}) {
   const {
     enableWebsiteEnrichment = true,
-    enableSocialEnrichment  = true,
-    enableN8nSending        = true
+    enableSocialEnrichment = true,
+    enableN8nSending = true,
+    crawlBatchId = null
   } = options;
+
+  if (crawlBatchId && cancelledBatches.has(crawlBatchId)) {
+    throw new Error('Process cancelled');
+  }
 
   logInfo(`🚀 Traitement: ${lead.nom_entreprise}`, { leadId: lead.lead_id });
 
@@ -1204,6 +1256,8 @@ async function processLead(lead, options = {}) {
   if (enableWebsiteEnrichment && lead.site_web && (!lead.email || lead.email.trim() === '')) {
     try {
       lead = await enrichWebsite(lead);
+      if (crawlBatchId && cancelledBatches.has(crawlBatchId)) throw new Error('CANCELLED');
+
     } catch (err) { logWarning(`Erreur enrichissement site: ${err.message}`); }
   }
 
@@ -1211,6 +1265,8 @@ async function processLead(lead, options = {}) {
   if (enableSocialEnrichment) {
     try {
       lead = await enrichSocial(lead);
+      if (crawlBatchId && cancelledBatches.has(crawlBatchId)) throw new Error('CANCELLED');
+
     } catch (err) { logWarning(`Erreur enrichissement social: ${err.message}`); }
   }
 
@@ -1237,38 +1293,48 @@ async function processLead(lead, options = {}) {
 /**
  * Point d'entrée principal
  * @param {string} keyword    — mot-clé de recherche
- * @param {string} source     — 'OpenStreetMap' | 'PagesJaunes' | 'TEST_DATA'
+ * @param {string[]} sources  — tableau de sources ['OpenStreetMap'] etc.
  * @param {string[]} departments — liste de départements, ex: ['75','69']
  * @param {Object} options    — options de traitement
  */
-async function mainProcess(keyword, source, departments = [], options = {}) {
+async function mainProcess(keyword, sources, departments = [], options = {}) {
   const {
     enableWebsiteEnrichment = true,
-    enableSocialEnrichment  = true,
-    enableN8nSending        = true,
-    concurrency             = 2,
-    delayBetweenLeads       = 8000,
-    maxPagesPerDept         = 1,
-    sheetId                 = null
+    enableSocialEnrichment = true,
+    enableN8nSending = true,
+    concurrency = 2,
+    delayBetweenLeads = 8000,
+    maxPagesPerDept = 1,
+    sheetId = null,
+    crawlBatchId = uuidv4()
   } = options;
 
-  logInfo(`🚀 Démarrage — keyword="${keyword}" source="${source}" depts="${departments.join(',') || 'ALL'}"`);
+  logInfo(`🚀 Démarrage — keyword="${keyword}" sources="${sources.join(',')}" depts="${departments.join(',') || 'ALL'}"`);
 
-  const crawlBatchId = uuidv4();
   let rawLeads = [];
 
   // ── SCRAPING ──
-  if (source === 'OpenStreetMap') {
-    rawLeads = await scrapeOpenStreetMap(
-      departments.length > 0 ? departments : DEPARTEMENTS_FRANCE,
-      crawlBatchId
-    );
-  } else if (source === 'PagesJaunes') {
-    rawLeads = await scrapePagesJaunes(departments, crawlBatchId, { maxPagesPerDept });
-  } else if (source === 'TEST_DATA') {
-    rawLeads = generateTestData(keyword, 5);
-  } else {
-    throw new Error(`Source invalide: ${source}`);
+  for (const source of sources) {
+    if (cancelledBatches.has(crawlBatchId)) {
+      logWarning(`Scraping global annulé avant de démarrer ${source}`);
+      break;
+    }
+
+    let sourceLeads = [];
+    if (source === 'OpenStreetMap') {
+      sourceLeads = await scrapeOpenStreetMap(
+        departments.length > 0 ? departments : DEPARTEMENTS_FRANCE,
+        crawlBatchId
+      );
+    } else if (source === 'PagesJaunes') {
+      sourceLeads = await scrapePagesJaunes(departments, crawlBatchId, { maxPagesPerDept });
+    } else if (source === 'TEST_DATA') {
+      sourceLeads = generateTestData(keyword, 5);
+    } else {
+      logWarning(`Source invalide ou non reconnue: ${source}`);
+    }
+
+    rawLeads.push(...sourceLeads);
   }
 
   // attach sheetId to raw leads when available
@@ -1287,12 +1353,25 @@ async function mainProcess(keyword, source, departments = [], options = {}) {
 
   // ── TRAITEMENT PAR LOTS ──
   for (let i = 0; i < rawLeads.length; i += concurrency) {
+    if (cancelledBatches.has(crawlBatchId)) {
+      logWarning(`🛑 Scraping annulé au cours de l'enrichissement. Retour des leads bruts.`);
+      // Si on annule, on remplit results avec les leads bruts non encore traités pour l'affichage
+      if (results.leads.length === 0) {
+        results.leads = rawLeads;
+        results.successful = rawLeads.length;
+      }
+      break;
+    }
     const batch = rawLeads.slice(i, i + concurrency);
 
     const batchResults = await Promise.allSettled(
       batch.map(async (lead, idx) => {
-        if (idx > 0) await new Promise(r => setTimeout(r, 2000));
-        return processLead(lead, { enableWebsiteEnrichment, enableSocialEnrichment, enableN8nSending });
+        if (cancelledBatches.has(crawlBatchId)) return Promise.reject(new Error('Cancelled'));
+        if (idx > 0) {
+          if (await cancellableSleep(2000, crawlBatchId)) return Promise.reject(new Error('CANCELLED'));
+        }
+
+        return processLead(lead, { enableWebsiteEnrichment, enableSocialEnrichment, enableN8nSending, crawlBatchId });
       })
     );
 
@@ -1312,7 +1391,7 @@ async function mainProcess(keyword, source, departments = [], options = {}) {
 
     if (i + concurrency < rawLeads.length) {
       logInfo(`⏳ Pause ${delayBetweenLeads}ms avant le prochain lot…`);
-      await new Promise(r => setTimeout(r, delayBetweenLeads));
+      if (await cancellableSleep(delayBetweenLeads, crawlBatchId)) break;
     }
 
     const progress = Math.round(((i + concurrency) / rawLeads.length) * 100);
@@ -1322,7 +1401,18 @@ async function mainProcess(keyword, source, departments = [], options = {}) {
   }
 
   logInfo(`🎉 Terminé: ${results.successful}/${results.total} leads traités avec succès`);
+
+  // Nettoyage de l'id d'annulation s'il est terminé normalement ou annulé
+  cancelledBatches.delete(crawlBatchId);
+
   return results;
+}
+
+function cancelScrape(batchId) {
+  if (batchId) {
+    cancelledBatches.add(batchId);
+    logInfo(`🛑 Signal d'annulation reçu pour le batch ${batchId}`);
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -1330,6 +1420,7 @@ async function mainProcess(keyword, source, departments = [], options = {}) {
 // ─────────────────────────────────────────────
 module.exports = {
   mainProcess,
+  cancelScrape,
   scrapeOpenStreetMap,
   scrapePagesJaunes,
   enrichWebsite,

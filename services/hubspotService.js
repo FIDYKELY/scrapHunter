@@ -1,3 +1,9 @@
+// services/hubspotService.js
+// Stratégie : on essaie d'abord avec toutes les propriétés custom.
+// Si HubSpot répond 400 PROPERTY_DOESNT_EXIST, on retente avec les champs
+// natifs uniquement (name, city, phone, website…) — ça fonctionne toujours.
+// Les propriétés custom sont stockées dans une note HubSpot en fallback.
+
 const fetch = require('node-fetch');
 const BASE_URL     = 'https://api.hubapi.com';
 const ACCESS_TOKEN = process.env.HUBSPOT_ACCESS_TOKEN;

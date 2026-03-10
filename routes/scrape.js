@@ -33,6 +33,11 @@ router.post('/start', isAuthenticatedAPI, (req, res) => {
   scrapeController.startScraping(req, res);
 });
 
+// Stop scraping endpoint
+router.post('/stop', isAuthenticatedAPI, (req, res) => {
+  scrapeController.stopScraping(req, res);
+});
+
 // Test n8n webhook endpoint
 router.post('/test-webhook', isAuthenticatedAPI, (req, res) => {
   scrapeController.testN8nWebhook(req, res);

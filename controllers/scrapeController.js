@@ -86,86 +86,117 @@ class ScrapeController {
 
     } catch (error) {
       console.error('❌ Scraping controller error:', error.message);
+
+      // Update session with error
       if (req.session.scrapingStatus) {
         req.session.scrapingStatus.isRunning = false;
-        req.session.scrapingStatus.error     = error.message;
+        req.session.scrapingStatus.error = error.message;
       }
-      return res.status(500).json({ success: false, error: error.message });
+
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Stats identiques à l'original
-  // ─────────────────────────────────────────────
   calculateStats(leads) {
     if (!leads || leads.length === 0) {
       return {
-        total: 0, withEmail: 0, withPhone: 0,
-        withWebsite: 0, withLinkedIn: 0, averageScore: 0,
-        priorityDistribution: { A: 0, B: 0, C: 0, D: 0 }
+        total: 0,
+        withEmail: 0,
+        withPhone: 0,
+        withWebsite: 0,
+        withLinkedIn: 0,
+        avgScore: 0,
+        priorityA: 0,
+        priorityB: 0,
+        priorityC: 0,
+        priorityD: 0
       };
     }
 
     const stats = {
-      total:        leads.length,
-      withEmail:    leads.filter(l => l.email).length,
-      withPhone:    leads.filter(l => l.telephone).length,
-      withWebsite:  leads.filter(l => l.site_web).length,
+      total: leads.length,
+      withEmail: leads.filter(l => l.email).length,
+      withPhone: leads.filter(l => l.telephone).length,
+      withWebsite: leads.filter(l => l.site_web).length,
       withLinkedIn: leads.filter(l => l.linkedin_company_url).length,
-      averageScore: Math.round(leads.reduce((s, l) => s + (l.score_global || 0), 0) / leads.length),
-      priorityDistribution: { A: 0, B: 0, C: 0, D: 0 }
+      avgScore: Math.round(leads.reduce((sum, l) => sum + (l.score_global || 0), 0) / leads.length),
+      priorityA: leads.filter(l => l.priorite === 'A').length,
+      priorityB: leads.filter(l => l.priorite === 'B').length,
+      priorityC: leads.filter(l => l.priorite === 'C').length,
+      priorityD: leads.filter(l => l.priorite === 'D').length
     };
-
-    leads.forEach(lead => {
-      const p = lead.priorite || 'C';
-      if (stats.priorityDistribution[p] !== undefined) stats.priorityDistribution[p]++;
-    });
 
     return stats;
   }
 
-  // ─────────────────────────────────────────────
-  // Status / Reset / Test webhook — inchangés
-  // ─────────────────────────────────────────────
   async getScrapingStatus(req, res) {
-    res.json(req.session.scrapingStatus || { isRunning: false, leadsCount: 0 });
+    const status = req.session.scrapingStatus || {
+      isRunning: false,
+      leadsCount: 0,
+      spreadsheetUrl: null
+    };
+
+    res.json(status);
   }
 
   resetScrapingStatus(req, res) {
-    req.session.scrapingStatus = { isRunning: false, leadsCount: 0 };
+    req.session.scrapingStatus = {
+      isRunning: false,
+      leadsCount: 0,
+      spreadsheetUrl: null
+    };
+
     res.json({ success: true, message: 'Scraping status reset' });
   }
 
-  async testN8nWebhook(req, res) {
-    try {
-      const testLead = {
-        lead_id:     uuidv4(),
-        source:      'test',
-        name:        'Test Agency',
-        telephone:   "'0123456789",
-        email:       'test@example.com',
-        address:     '123 Test Street, Paris, France',
-        website:     'https://example.com',
-        score_global: 75,
-        priorite:    'A',
-        reason:      'Test lead',
-        keyword:     'test'
-      };
-      // sendToN8n est exporté depuis legacyScraper
-      const result = await legacyScraper.sendToN8n(testLead);
-      res.json({ success: true, message: 'Test webhook envoyé', result });
-    } catch (error) {
-      console.error('❌ Test webhook error:', error.message);
-      res.status(500).json({ success: false, error: error.message });
+  stopScraping(req, res) {
+    if (req.session.scrapingStatus && req.session.scrapingStatus.crawlBatchId) {
+      const batchId = req.session.scrapingStatus.crawlBatchId;
+      console.log(`🛑 Stopping scrape batch: ${batchId}`);
+      if (typeof legacyScraper.cancelScrape === 'function') {
+        legacyScraper.cancelScrape(batchId);
+      }
+      res.json({ success: true, message: 'Stop signal sent' });
+    } else {
+      res.status(400).json({ error: 'No active scraping process found in session.' });
     }
   }
 
-  // ─────────────────────────────────────────────
-  // Healthcheck HubSpot (optionnel, appelé depuis la route /check-hubspot)
-  // ─────────────────────────────────────────────
-  async checkHubSpot(req, res) {
-    const status = await hubspotService.checkConnection();
-    res.json(status);
+  // Nouvelle méthode pour tester uniquement l'envoi n8n
+  async testN8nWebhook(req, res) {
+    try {
+      const testLead = {
+        lead_id: uuidv4(),
+        source: 'test',
+        name: 'Test Agency',
+        telephone: "'0123456789",
+        email: 'test@example.com',
+        address: '123 Test Street, Paris, France',
+        website: 'https://example.com',
+        score_global: 75,
+        priorite: 'A',
+        reason: 'Test lead',
+        keyword: 'test'
+      };
+
+      const result = await legacyScraper.sendToN8n(testLead);
+
+      res.json({
+        success: !!result,
+        message: result ? 'Test webhook sent successfully' : 'Test webhook failed',
+        result: { success: !!result }
+      });
+
+    } catch (error) {
+      console.error('❌ Test webhook error:', error.message);
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
   }
 }
 
