@@ -1,5 +1,4 @@
 const legacyScraper = require('../services/legacyScraper');
-//const googleSheetsService = require('../services/googleSheetsService');
 const { v4: uuidv4 } = require('uuid');
 
 class ScrapeController {
@@ -23,7 +22,6 @@ class ScrapeController {
         departments,
         startTime: new Date(),
         leadsCount: 0,
-        spreadsheetUrl: null,
         enrichmentEnabled: enableEnrichment,
         n8nEnabled: enableN8nSending,
         oneByOneProcessing: oneByOneProcessing
@@ -38,17 +36,6 @@ class ScrapeController {
       req.session.scrapingStatus.isRunning = false;
       if (sheetId) req.session.scrapingStatus.sheetId = sheetId;
 
-      // ÉTAPE 3: Création Google Sheet (toujours)
-      if (results.leads.length > 0) {
-        const sheetTitle = `leads-${keyword}-${new Date().toISOString().split('T')[0]}`;
-        const { spreadsheetUrl } = await googleSheetsService.createSpreadsheetWithLeads(sheetTitle, results.leads);
-        
-        // Update session with spreadsheet URL
-        req.session.scrapingStatus.spreadsheetUrl = spreadsheetUrl;
-        
-        console.log(`✅ Google Sheet created: ${spreadsheetUrl}`);
-      }
-
       // Calculer les statistiques
       const stats = this.calculateStats(results.leads);
 
@@ -56,7 +43,6 @@ class ScrapeController {
         success: true,
         message: `Successfully scraped and processed ${results.successful} leads`,
         leadsCount: results.successful,
-        spreadsheetUrl: req.session.scrapingStatus.spreadsheetUrl,
         keyword,
         source,
         enrichment: enableEnrichment,
@@ -119,8 +105,7 @@ class ScrapeController {
   async getScrapingStatus(req, res) {
     const status = req.session.scrapingStatus || {
       isRunning: false,
-      leadsCount: 0,
-      spreadsheetUrl: null
+      leadsCount: 0
     };
 
     res.json(status);
@@ -129,8 +114,7 @@ class ScrapeController {
   resetScrapingStatus(req, res) {
     req.session.scrapingStatus = {
       isRunning: false,
-      leadsCount: 0,
-      spreadsheetUrl: null
+      leadsCount: 0
     };
 
     res.json({ success: true, message: 'Scraping status reset' });
