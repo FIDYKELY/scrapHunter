@@ -201,6 +201,97 @@
             transition: width 0.3s ease;
         }
 
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(4px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            max-width: 400px;
+            width: 90%;
+            text-align: center;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+
+        .modal-overlay.active .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            color: #e53935;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #1f2937;
+            margin-bottom: 0.75rem;
+        }
+
+        .modal-text {
+            color: #6b7280;
+            margin-bottom: 1.5rem;
+            line-height: 1.5;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+        }
+
+        .modal-btn {
+            padding: 0.625rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+
+        .modal-btn-cancel {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .modal-btn-cancel:hover {
+            background: #e5e7eb;
+        }
+
+        .modal-btn-confirm {
+            background: #ef4444;
+            color: white;
+        }
+
+        .modal-btn-confirm:hover {
+            background: #dc2626;
+            box-shadow: 0 4px 6px -1px rgba(239, 68, 68, 0.2);
+        }
+
         .results-section {
             margin-top: 1rem;
             padding-top: 1rem;
@@ -595,6 +686,21 @@
         </div>
     </div>
 
+    <!-- Confirmation Modal -->
+    <div class="modal-overlay" id="stopModal">
+        <div class="modal-content">
+            <div class="modal-icon">⚠️</div>
+            <div class="modal-title">Arrêter le processus ?</div>
+            <div class="modal-text">
+                Êtes-vous sûr de vouloir arrêter le scraping ? Les données déjà collectées seront conservées.
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-cancel" id="cancelStop">Annuler</button>
+                <button class="modal-btn modal-btn-confirm" id="confirmStop">Arrêter</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let isScraping = false;
         let logPollingInterval = null;
@@ -795,9 +901,36 @@
             startScraping(keyword, sources, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId);
         });
 
-        // Stop button
-        stopButton.addEventListener('click', async () => {
+        // Custom Modal Logic
+        const stopModal = document.getElementById('stopModal');
+        const confirmStopBtn = document.getElementById('confirmStop');
+        const cancelStopBtn = document.getElementById('cancelStop');
+
+        function openStopModal() {
+            stopModal.classList.add('active');
+        }
+
+        function closeStopModal() {
+            stopModal.classList.remove('active');
+        }
+
+        // Stop button trigger
+        stopButton.addEventListener('click', () => {
             if (!isScraping) return;
+            openStopModal();
+        });
+
+        // Modal cancel
+        cancelStopBtn.addEventListener('click', closeStopModal);
+
+        // Modal outside click
+        stopModal.addEventListener('click', (e) => {
+            if (e.target === stopModal) closeStopModal();
+        });
+
+        // Modal confirm action
+        confirmStopBtn.addEventListener('click', async () => {
+            closeStopModal();
             try {
                 const response = await fetch('/scrape/stop', { method: 'POST' });
                 const result = await response.json();
@@ -810,6 +943,7 @@
                 console.error('Error stopping scrape', err);
             }
         });
+
 
         // Reset button
         resetButton.addEventListener('click', resetScrapingStatus);

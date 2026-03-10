@@ -1,5 +1,4 @@
 const legacyScraper = require('../services/legacyScraper');
-const googleSheetsService = require('../services/googleSheetsService');
 const { v4: uuidv4 } = require('uuid');
 
 class ScrapeController {
@@ -48,25 +47,18 @@ class ScrapeController {
       req.session.scrapingStatus.isRunning = false;
       if (sheetId) req.session.scrapingStatus.sheetId = sheetId;
 
-      // ÉTAPE 3: Création Google Sheet (toujours)
-      if (results.leads.length > 0) {
-        const sheetTitle = `leads-${keyword}-${new Date().toISOString().split('T')[0]}`;
-        const { spreadsheetUrl } = await googleSheetsService.createSpreadsheetWithLeads(sheetTitle, results.leads);
-
-        // Update session with spreadsheet URL
-        req.session.scrapingStatus.spreadsheetUrl = spreadsheetUrl;
-
-        console.log(`✅ Google Sheet created: ${spreadsheetUrl}`);
-      }
-
       // Calculer les statistiques
       const stats = this.calculateStats(results.leads);
+
+      // Construct spreadsheet URL from sheetId if available
+      const spreadsheetUrl = sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}` : null;
+      if (spreadsheetUrl) req.session.scrapingStatus.spreadsheetUrl = spreadsheetUrl;
 
       res.json({
         success: true,
         message: `Successfully scraped and processed ${results.successful} leads`,
         leadsCount: results.successful,
-        spreadsheetUrl: req.session.scrapingStatus.spreadsheetUrl,
+        spreadsheetUrl: spreadsheetUrl,
         keyword,
         sources,
         enrichment: enableEnrichment,

@@ -15,6 +15,24 @@ const path = require('path');
 const cancelledBatches = new Set();
 // --------------------------
 
+/**
+ * Attente capable d'être interrompue
+ * Retourne true si annulé, false sinon
+ */
+async function cancellableSleep(ms, crawlBatchId) {
+  if (!crawlBatchId) {
+    await new Promise(r => setTimeout(r, ms));
+    return false;
+  }
+  const start = Date.now();
+  while (Date.now() - start < ms) {
+    if (cancelledBatches.has(crawlBatchId)) return true;
+    const remaining = ms - (Date.now() - start);
+    await new Promise(r => setTimeout(r, Math.min(1000, remaining)));
+  }
+  return cancelledBatches.has(crawlBatchId);
+}
+
 // ─────────────────────────────────────────────
 // LOGGER
 // ─────────────────────────────────────────────
@@ -494,7 +512,15 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
             }
           }
         }
-        if (i < bboxes.length - 1) await new Promise(r => setTimeout(r, 15000));
+        if (cancelledBatches.has(crawlBatchId)) break;
+        if (i < bboxes.length - 1) {
+          if (await cancellableSleep(15000, crawlBatchId)) break;
+        }
+      }
+
+      if (cancelledBatches.has(crawlBatchId)) {
+        logWarning(`🛑 Scraping OSM pour le département ${dept} annulé.`);
+        return [];
       }
 
       const leads = [];
@@ -517,7 +543,7 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
       retryCount++;
       logError(`Erreur dept ${dept} OSM (tentative ${retryCount}/${maxRetries}): ${error.message}`);
       if (retryCount >= maxRetries) return [];
-      await new Promise(r => setTimeout(r, 30000 * retryCount));
+      await cancellableSleep(30000 * retryCount, crawlBatchId);
     }
   }
   return [];
@@ -540,7 +566,7 @@ async function scrapeOpenStreetMap(departments = DEPARTEMENTS_FRANCE, crawlBatch
     if (i < departments.length - 1) {
       const delay = 30000 + Math.random() * 30000;
       logInfo(`Pause entre départements: ${Math.round(delay)}ms`);
-      await new Promise(r => setTimeout(r, delay));
+      if (await cancellableSleep(delay, crawlBatchId)) break;
     }
   }
   logInfo(`Scraping OSM terminé: ${allLeads.length} leads`);
@@ -550,7 +576,9 @@ async function scrapeOpenStreetMap(departments = DEPARTEMENTS_FRANCE, crawlBatch
 // ─────────────────────────────────────────────
 // PAGESJAUNES — détail d'agence
 // ─────────────────────────────────────────────
-async function scrapeAgencyDetail(url) {
+async function scrapeAgencyDetail(url, crawlBatchId) {
+  if (crawlBatchId && cancelledBatches.has(crawlBatchId)) return null;
+
   const browser = await puppeteer.launch({
     headless: 'new',
     args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -781,7 +809,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
             await page.waitForSelector('.bi-list, .bi-liste, li[id^="bi-"]', { timeout: 10000 });
           } catch (_) { logWarning(`Timeout .bi-list dept=${dept}`); }
 
-          await new Promise(r => setTimeout(r, 2000));
+          if (await cancellableSleep(2000, crawlBatchId)) throw new Error('CANCELLED');
 
           // Récupérer les liens des fiches
           const listingItems = await page.evaluate(() => {
@@ -804,7 +832,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
             if (cancelledBatches.has(crawlBatchId)) break;
 
             logInfo(`Traitement: ${item.nom_apercu} — ${item.source_url}`);
-            const details = await scrapeAgencyDetail(item.source_url);
+            const details = await scrapeAgencyDetail(item.source_url, crawlBatchId);
             if (details) {
               const lead = buildLeadFromPagesJaunesDetail(details, dept, crawlBatchId, item.source_url);
               allLeads.push(lead);
@@ -815,7 +843,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
               });
             }
             // Pause aléatoire entre les fiches
-            await new Promise(r => setTimeout(r, 2000 + Math.random() * 3000));
+            if (await cancellableSleep(2000 + Math.random() * 3000, crawlBatchId)) break;
           }
 
           hasNextPage = await page.evaluate(() => !!document.querySelector('a#pagination-next, a.next'));
@@ -827,7 +855,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
         }
 
         if (pageNum <= maxPagesPerDept) {
-          await new Promise(r => setTimeout(r, 15000 + Math.random() * 15000));
+          if (await cancellableSleep(15000 + Math.random() * 15000, crawlBatchId)) break;
         }
       }
     } catch (err) {
@@ -1229,6 +1257,8 @@ async function processLead(lead, options = {}) {
   if (enableWebsiteEnrichment && lead.site_web && (!lead.email || lead.email.trim() === '')) {
     try {
       lead = await enrichWebsite(lead);
+      if (crawlBatchId && cancelledBatches.has(crawlBatchId)) throw new Error('CANCELLED');
+
     } catch (err) { logWarning(`Erreur enrichissement site: ${err.message}`); }
   }
 
@@ -1236,6 +1266,8 @@ async function processLead(lead, options = {}) {
   if (enableSocialEnrichment) {
     try {
       lead = await enrichSocial(lead);
+      if (crawlBatchId && cancelledBatches.has(crawlBatchId)) throw new Error('CANCELLED');
+
     } catch (err) { logWarning(`Erreur enrichissement social: ${err.message}`); }
   }
 
@@ -1336,7 +1368,10 @@ async function mainProcess(keyword, sources, departments = [], options = {}) {
     const batchResults = await Promise.allSettled(
       batch.map(async (lead, idx) => {
         if (cancelledBatches.has(crawlBatchId)) return Promise.reject(new Error('Cancelled'));
-        if (idx > 0) await new Promise(r => setTimeout(r, 2000));
+        if (idx > 0) {
+          if (await cancellableSleep(2000, crawlBatchId)) return Promise.reject(new Error('CANCELLED'));
+        }
+
         return processLead(lead, { enableWebsiteEnrichment, enableSocialEnrichment, enableN8nSending, crawlBatchId });
       })
     );
@@ -1357,7 +1392,7 @@ async function mainProcess(keyword, sources, departments = [], options = {}) {
 
     if (i + concurrency < rawLeads.length) {
       logInfo(`⏳ Pause ${delayBetweenLeads}ms avant le prochain lot…`);
-      await new Promise(r => setTimeout(r, delayBetweenLeads));
+      if (await cancellableSleep(delayBetweenLeads, crawlBatchId)) break;
     }
 
     const progress = Math.round(((i + concurrency) / rawLeads.length) * 100);
