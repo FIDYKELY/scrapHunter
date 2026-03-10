@@ -75,4 +75,10 @@ router.post("/create-sheet", isAuthenticatedAPI, async (req, res) => {
     });
   }
 });
+// Healthcheck HubSpot
+router.get('/check-hubspot', isAuthenticatedAPI, (req, res) => {
+  scrapeController.checkHubSpot(req, res);
+});
+
 module.exports = router;
+

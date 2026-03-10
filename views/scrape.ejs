@@ -416,6 +416,70 @@
             font-size: 0.8rem;
             margin-left: auto;
         }
+
+        /* ── Destinations ── */
+        .destinations-section { margin-top: 1.5rem; }
+        .dest-subtitle { color: #666; font-size: 0.85rem; margin-bottom: 1rem; font-weight: 400; }
+
+        .dest-option {
+            border: 2px solid #e1e5e9;
+            border-radius: 8px;
+            padding: 0.85rem 1rem;
+            margin-bottom: 0.75rem;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .dest-option:has(input:checked) { border-color: #667eea; background: #f5f3ff; }
+
+        .dest-label { align-items: flex-start !important; }
+        .dest-label input[type="checkbox"] { margin-top: 0.2rem; flex-shrink: 0; }
+
+        .dest-icon-wrap {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex: 1;
+            flex-wrap: wrap;
+        }
+        .dest-icon { font-size: 1.2rem; }
+        .dest-text { display: flex; flex-direction: column; flex: 1; }
+        .dest-text strong { color: #333; font-size: 0.95rem; }
+        .dest-text small  { color: #888; font-size: 0.8rem; margin-top: 0.1rem; }
+
+        .dest-badge {
+            padding: 0.15rem 0.55rem;
+            border-radius: 9999px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        .badge-active   { background: #d4edda; color: #155724; }
+        .badge-error    { background: #f8d7da; color: #721c24; }
+        .badge-checking { background: #fff3cd; color: #856404; }
+        .badge-disabled { background: #e2e8f0; color: #64748b; }
+
+        .dest-error {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 5px;
+            padding: 0.6rem 1rem;
+            font-size: 0.88rem;
+            color: #856404;
+            margin-top: 0.5rem;
+        }
+
+        /* ── Résultats par destination ── */
+        .dest-result-block {
+            padding: 0.7rem 1rem;
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            border-left: 4px solid #94a3b8;
+            background: #f8f9fa;
+            font-size: 0.88rem;
+        }
+        .dest-result-block.ok    { border-left-color: #28a745; background: #f0fff4; }
+        .dest-result-block.error { border-left-color: #dc3545; background: #fff5f5; }
+        .dest-result-block strong { display: block; margin-bottom: 0.2rem; }
+        .dest-result-block a { color: #28a745; }
     </style>
 </head>
 <body>
@@ -476,15 +540,52 @@
                     </div>
                     <div class="form-group">
                         <label class="checkbox-label">
-                            <input type="checkbox" id="enableN8nSending" name="enableN8nSending" checked>
-                            <span>Envoyer au webhook n8n pour le stockage Google Sheets</span>
+                            <input type="checkbox" id="oneByOneProcessing" name="oneByOneProcessing" checked>
+                            <span>Processus menant un par un (recommandé)</span>
                         </label>
                     </div>
-                    <div class="form-group">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="oneByOneProcessing" name="oneByOneProcessing" checked>
-                            <span>Processus menant un par un (recommandé pour n8n)</span>
+                </div>
+
+                <!-- ═══════════════════════════════════════════ -->
+                <!-- BLOC DESTINATIONS                           -->
+                <!-- ═══════════════════════════════════════════ -->
+                <div class="options-section destinations-section">
+                    <h3>📤 Destination des leads</h3>
+                    <p class="dest-subtitle">Choisissez où enregistrer les leads scrapés (plusieurs destinations possibles)</p>
+
+                    <!-- Google Sheets -->
+                    <div class="form-group dest-option" id="destGoogleSheetsOption">
+                        <label class="checkbox-label dest-label">
+                            <input type="checkbox" id="destGoogleSheets" name="destGoogleSheets" checked>
+                            <span class="dest-icon-wrap">
+                                <span class="dest-icon">📊</span>
+                                <span class="dest-text">
+                                    <strong>Google Sheets</strong>
+                                    <small>Via webhook n8n — crée une feuille avec tous les leads</small>
+                                </span>
+                                <span class="dest-badge badge-active">Configuré</span>
+                            </span>
                         </label>
+                    </div>
+
+                    <!-- HubSpot -->
+                    <div class="form-group dest-option" id="destHubSpotOption">
+                        <label class="checkbox-label dest-label">
+                            <input type="checkbox" id="destHubSpot" name="destHubSpot">
+                            <span class="dest-icon-wrap">
+                                <span class="dest-icon">🟠</span>
+                                <span class="dest-text">
+                                    <strong>HubSpot CRM</strong>
+                                    <small>Crée une Company + Contact par lead, avec déduplication</small>
+                                </span>
+                                <span id="hubspotBadge" class="dest-badge badge-checking">Vérification…</span>
+                            </span>
+                        </label>
+                    </div>
+
+                    <!-- Message erreur si aucune destination -->
+                    <div id="destError" class="dest-error" style="display:none;">
+                        ⚠️ Veuillez sélectionner au moins une destination.
                     </div>
                 </div>
 
@@ -514,12 +615,16 @@
             <div class="results-section" id="resultsSection" style="display: none;">
                 <div class="results-info">
                     <div>
-                        <strong>Leads trouvées :</strong> <span id="leadsCount">0</span>
+                        <strong>Leads trouvés :</strong> <span id="leadsCount">0</span>
                     </div>
                     <div>
-                        <a href="#" id="sheetLink" class="sheet-link" target="_blank">Ouvrir Google Sheet</a>
+                        <a href="#" id="sheetLink" class="sheet-link" target="_blank" style="display:none;">Ouvrir Google Sheet</a>
                         <button id="resetButton" class="reset-button">Nouveau Scrape</button>
                     </div>
+                </div>
+                <div id="destResults" style="margin-top:1rem; display:none;">
+                    <div id="gsResult" class="dest-result-block" style="display:none;"></div>
+                    <div id="hsResult" class="dest-result-block" style="display:none;"></div>
                 </div>
             </div>
         </div>
@@ -697,98 +802,157 @@
             if (isScraping) return;
 
             const keyword = document.getElementById('keyword').value.trim();
-            const source = document.getElementById('source').value;
-            const enableEnrichment = document.getElementById('enableEnrichment').checked;
-            const enableN8nSending = document.getElementById('enableN8nSending').checked;
+            const source  = document.getElementById('source').value;
+            const enableEnrichment   = document.getElementById('enableEnrichment').checked;
             const oneByOneProcessing = document.getElementById('oneByOneProcessing').checked;
             const selectedDepartments = getSelectedDepartments();
 
+            // Destinations
+            const destGoogleSheets = document.getElementById('destGoogleSheets').checked;
+            const destHubSpot      = document.getElementById('destHubSpot').checked;
+
             if (!keyword || !source) {
-                alert('Please fill in all required fields');
+                alert('Veuillez remplir tous les champs obligatoires');
                 return;
             }
 
-            // create sheet first and grab its id
+            // Validation destinations
+            if (!destGoogleSheets && !destHubSpot) {
+                document.getElementById('destError').style.display = 'block';
+                return;
+            }
+            document.getElementById('destError').style.display = 'none';
+
+            // Créer la feuille Google si Google Sheets est coché
             let sheetId = null;
-            try {
-                const sheetResp = await fetch('/scrape/create-sheet', { method: 'POST' });
-                const sheetData = await sheetResp.json();
-                if (sheetData && sheetData.spreadsheetId) {
-                    sheetId = sheetData.spreadsheetId;
+            if (destGoogleSheets) {
+                try {
+                    const sheetResp = await fetch('/scrape/create-sheet', { method: 'POST' });
+                    const sheetData = await sheetResp.json();
+                    if (sheetData && sheetData.spreadsheetId) {
+                        sheetId = sheetData.spreadsheetId;
+                    }
+                } catch (err) {
+                    console.warn('Could not create sheet before scraping', err);
                 }
-            } catch (err) {
-                console.warn('Could not create sheet before scraping', err);
             }
 
-            startScraping(keyword, source, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId);
+            startScraping(keyword, source, enableEnrichment, destGoogleSheets, oneByOneProcessing, selectedDepartments, sheetId, destHubSpot);
         });
 
         // Reset button
         resetButton.addEventListener('click', resetScrapingStatus);
 
-        async function startScraping(keyword, source, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId = null) {
+        async function startScraping(keyword, source, enableEnrichment, enableN8nSending, oneByOneProcessing, selectedDepartments, sheetId, destHubSpot) {
             isScraping = true;
             button.disabled = true;
             statusCard.classList.add('active');
             
             let statusText = enableEnrichment ? 
-                `Scraping ${keyword} from ${source} with enrichment...` : 
-                `Scraping ${keyword} from ${source}...`;
+                `Scraping ${keyword} depuis ${source} avec enrichissement…` : 
+                `Scraping ${keyword} depuis ${source}…`;
+            if (selectedDepartments.length > 0) statusText += ` (${selectedDepartments.length} départements)`;
             
-            if (selectedDepartments.length > 0) {
-                statusText += ` (${selectedDepartments.length} departments)`;
-            }
-            
-            updateStatus('loading', 'Scraping in progress...', statusText);
+            updateStatus('loading', 'Scraping en cours…', statusText);
             progressFill.style.width = '25%';
-
-            // Start log polling
             startLogPolling();
 
             try {
                 const response = await fetch('/scrape/start', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ 
                         keyword, 
                         source, 
                         enableEnrichment, 
                         enableN8nSending,
                         oneByOneProcessing,
-                        departments: selectedDepartments,
-                        sheetId
+                        departments:     selectedDepartments,
+                        sheetId,
+                        destGoogleSheets: enableN8nSending,
+                        destHubSpot
                     })
                 });
 
                 const result = await response.json();
 
                 if (result.success) {
-                    const processingMode = oneByOneProcessing ? 'one by one' : 'in batch';
-                    updateStatus('success', 'Scraping completed!', 
-                        `Found ${result.leadsCount} leads${result.enrichment ? ' with enrichment' : ''}${result.n8nSending ? ` and sent to n8n ${processingMode}` : ''}`);
+                    updateStatus('success', 'Scraping terminé !', 
+                        `${result.leadsCount} leads traités en ${result.processingTime}s`);
                     progressFill.style.width = '100%';
                     
                     leadsCount.textContent = result.leadsCount;
-                    sheetLink.href = result.spreadsheetUrl;
                     resultsSection.style.display = 'block';
 
-                    // Show detailed statistics
-                    if (result.stats) {
-                        showStatistics(result.stats);
-                    }
+                    // Affichage résultats destinations
+                    showDestinationResults(result, enableN8nSending, destHubSpot);
+
+                    // Statistiques
+                    if (result.stats) showStatistics(result.stats);
+
                 } else {
                     throw new Error(result.error);
                 }
 
             } catch (error) {
-                updateStatus('error', 'Scraping failed', error.message);
+                updateStatus('error', 'Scraping échoué', error.message);
                 progressFill.style.width = '0%';
             } finally {
                 isScraping = false;
                 button.disabled = false;
                 stopLogPolling();
+            }
+        }
+
+        function showDestinationResults(result, destGS, destHS) {
+            const wrapper = document.getElementById('destResults');
+            if (!wrapper) return;
+            wrapper.style.display = 'block';
+
+            // Google Sheets
+            const gsEl = document.getElementById('gsResult');
+            if (destGS) {
+                gsEl.style.display = 'block';
+                if (result.spreadsheetUrl) {
+                    gsEl.className = 'dest-result-block ok';
+                    gsEl.innerHTML = `<strong>📊 Google Sheets</strong>${result.leadsCount} leads exportés — <a href="${result.spreadsheetUrl}" target="_blank">Ouvrir la feuille</a>`;
+                    // Afficher le bouton sheet si on a une URL
+                    const sl = document.getElementById('sheetLink');
+                    sl.href = result.spreadsheetUrl;
+                    sl.style.display = 'inline-block';
+                } else {
+                    gsEl.className = 'dest-result-block ok';
+                    gsEl.innerHTML = `<strong>📊 Google Sheets</strong>${result.leadsCount} leads envoyés via n8n`;
+                }
+            } else {
+                gsEl.style.display = 'none';
+            }
+
+            // HubSpot
+            const hsEl = document.getElementById('hsResult');
+            if (destHS && result.hubspot) {
+                hsEl.style.display = 'block';
+                const hs = result.hubspot;
+                if (hs.failed === 0) {
+                    hsEl.className = 'dest-result-block ok';
+                    hsEl.innerHTML = `<strong>🟠 HubSpot CRM</strong>${hs.created} créés, ${hs.updated} mis à jour`;
+                } else {
+                    hsEl.className = 'dest-result-block error';
+                    let errHtml = `<strong>🟠 HubSpot CRM</strong>${hs.created} créés, ${hs.updated} mis à jour, <span style="color:#dc3545">${hs.failed} échouées</span>`;
+                    if (hs.errors?.length) {
+                        errHtml += `<ul style="margin:.3rem 0 0 1rem;font-size:.8rem;color:#721c24">`;
+                        hs.errors.slice(0, 3).forEach(e => { errHtml += `<li>${e}</li>`; });
+                        if (hs.errors.length > 3) errHtml += `<li>…et ${hs.errors.length - 3} autre(s)</li>`;
+                        errHtml += '</ul>';
+                    }
+                    hsEl.innerHTML = errHtml;
+                }
+            } else if (destHS && !result.hubspot) {
+                hsEl.style.display = 'block';
+                hsEl.className = 'dest-result-block error';
+                hsEl.innerHTML = `<strong>🟠 HubSpot CRM</strong>Erreur lors de l'envoi`;
+            } else {
+                hsEl.style.display = 'none';
             }
         }
 
@@ -861,18 +1025,23 @@
             progressFill.style.width = '0%';
             resultsSection.style.display = 'none';
             
+            // Reset destination results
+            document.getElementById('destResults').style.display = 'none';
+            document.getElementById('gsResult').style.display = 'none';
+            document.getElementById('hsResult').style.display = 'none';
+            document.getElementById('sheetLink').style.display = 'none';
+
             // Remove statistics section if exists
             const statsSection = document.querySelector('.statistics-section');
-            if (statsSection) {
-                statsSection.remove();
-            }
+            if (statsSection) statsSection.remove();
             
-            // Clear and hide logs
             clearLogs();
             logContainer.classList.remove('active');
             stopLogPolling();
             
             form.reset();
+            // Remettre Google Sheets coché par défaut
+            document.getElementById('destGoogleSheets').checked = true;
             isScraping = false;
             button.disabled = false;
         }
@@ -911,6 +1080,31 @@
         
         // Initialize departments on page load
         initializeDepartments();
+
+        // Vérifier la connexion HubSpot au chargement
+        async function checkHubSpotStatus() {
+            const badge = document.getElementById('hubspotBadge');
+            const checkbox = document.getElementById('destHubSpot');
+            try {
+                const res = await fetch('/scrape/check-hubspot');
+                const data = await res.json();
+                if (data.connected) {
+                    badge.className = 'dest-badge badge-active';
+                    badge.textContent = 'Connecté';
+                } else {
+                    badge.className = 'dest-badge badge-error';
+                    badge.textContent = 'Erreur: ' + (data.message || 'non configuré');
+                    checkbox.disabled = true;
+                    document.getElementById('destHubSpotOption').style.opacity = '0.6';
+                }
+            } catch (err) {
+                badge.className = 'dest-badge badge-disabled';
+                badge.textContent = 'Non configuré';
+                checkbox.disabled = true;
+                document.getElementById('destHubSpotOption').style.opacity = '0.6';
+            }
+        }
+        checkHubSpotStatus();
     </script>
 </body>
 </html>
