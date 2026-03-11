@@ -84,6 +84,14 @@ class ScrapeController {
       // ── STATS ─────────────────────────────────────────────────────────
       const stats = this.calculateStats(leads);
 
+      // Construct spreadsheetUrl if sheetId exists
+      let spreadsheetUrl = null;
+      if (sheetId) {
+        spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+        req.session.scrapingStatus.spreadsheetUrl = spreadsheetUrl;
+        await new Promise((resolve) => req.session.save(() => resolve()));
+      }
+
       return res.json({
         success: true,
         message: `${results.successful} leads traités avec succès`,
@@ -94,6 +102,7 @@ class ScrapeController {
         n8nSending: enableN8nSending && destGoogleSheets,
         oneByOneProcessing,
         stats,
+        spreadsheetUrl, // Return to frontend
         hubspot: hubspotStats,
         processingTime: Math.round((Date.now() - req.session.scrapingStatus.startTime.getTime()) / 1000)
       });
