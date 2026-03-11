@@ -3,6 +3,33 @@ const legacyScraper = require('../services/legacyScraper');
 const hubspotService = require('../services/hubspotService');
 const { v4: uuidv4 } = require('uuid');
 
+// ── File d'attente globale (partagée sur toute l'application) ─────────
+let globalScrapingActive = false;
+const scrapingQueue = []; // [{ queueId, params, status: 'waiting'|'ready' }]
+
+function enqueue(params) {
+  const queueId = require('uuid').v4();
+  scrapingQueue.push({ queueId, params, status: 'waiting', enqueuedAt: new Date() });
+  return { queueId, position: scrapingQueue.length };
+}
+
+function dequeueNext() {
+  // Marque le premier de la file comme "ready" (c'est son tour)
+  if (scrapingQueue.length > 0) {
+    scrapingQueue[0].status = 'ready';
+  }
+}
+
+function removeFromQueue(queueId) {
+  const idx = scrapingQueue.findIndex(q => q.queueId === queueId);
+  if (idx !== -1) scrapingQueue.splice(idx, 1);
+}
+
+function getQueuePosition(queueId) {
+  const idx = scrapingQueue.findIndex(q => q.queueId === queueId);
+  return idx; // -1 = pas trouvé, 0 = premier (ready), 1+ = en attente
+}
+
 class ScrapeController {
 
   async startScraping(req, res) {
@@ -15,23 +42,45 @@ class ScrapeController {
       departments = [],
       sheetId = null,
       destGoogleSheets = true,
-      destHubSpot = false
+      destHubSpot = false,
+      queueId = null        // présent si l'utilisateur reprend depuis la queue
     } = req.body;
 
-    // Normaliser source en tableau (multi-source depuis les checkboxes)
+    // Normaliser source en tableau
     const sources = Array.isArray(source) ? source : (source ? [source] : []);
 
     if (!keyword || sources.length === 0) {
       return res.status(400).json({ error: 'Keyword and at least one source are required' });
     }
-
-    // Au moins une destination doit être cochée
     if (!destGoogleSheets && !destHubSpot) {
       return res.status(400).json({ error: 'Veuillez sélectionner au moins une destination (Google Sheets ou HubSpot).' });
     }
 
+    // ── GESTION DE LA FILE D'ATTENTE ───────────────────────────────────
+    if (globalScrapingActive) {
+      // Si c'est un retour de queue : vérifier que c'est bien son tour
+      if (queueId) {
+        const pos = getQueuePosition(queueId);
+        if (pos !== 0) {
+          // Pas encore son tour, renvoyer sa position actuelle
+          return res.json({ queued: true, position: pos + 1, queueId });
+        }
+        // C'est son tour : on le retire de la queue et on continue
+        removeFromQueue(queueId);
+      } else {
+        // Nouvelle demande : placer en queue et répondre immédiatement
+        const queued = enqueue({ keyword, source, enableEnrichment, enableN8nSending,
+          oneByOneProcessing, departments, sheetId, destGoogleSheets, destHubSpot });
+        console.log(`📋 Scraping en file d'attente — position ${queued.position} (queueId: ${queued.queueId})`);
+        return res.json({ queued: true, position: queued.position, queueId: queued.queueId });
+      }
+    }
+
+    // ── DÉMARRAGE ──────────────────────────────────────────────────────
+    globalScrapingActive = true;
+
     try {
-      const batchId = uuidv4(); // Generate a batch ID for cancellation
+      const batchId = uuidv4();
       console.log(`🚀 Starting scraping: keyword="${keyword}", sources="${sources.join(',')}", departments="${departments.length > 0 ? departments.join(',') : 'ALL'}"`);
       console.log(`📤 Destinations: Google Sheets=${destGoogleSheets}, HubSpot=${destHubSpot}`);
 
@@ -110,7 +159,6 @@ class ScrapeController {
     } catch (error) {
       console.error('❌ Scraping controller error:', error.message);
 
-      // Update session with error
       if (req.session.scrapingStatus) {
         req.session.scrapingStatus.isRunning = false;
         req.session.scrapingStatus.error = error.message;
@@ -120,6 +168,13 @@ class ScrapeController {
         success: false,
         error: error.message
       });
+    } finally {
+      // ── LIBÉRER LA FILE D'ATTENTE ──────────────────────────────────
+      globalScrapingActive = false;
+      dequeueNext(); // signale au prochain qu'il peut démarrer
+      if (scrapingQueue.length > 0) {
+        console.log(`📋 Queue: ${scrapingQueue.length} scraping(s) en attente — prochain: ${scrapingQueue[0].queueId}`);
+      }
     }
   }
 
@@ -225,6 +280,33 @@ class ScrapeController {
   async checkHubSpot(req, res) {
     const status = await hubspotService.checkConnection();
     res.json(status);
+  }
+
+  async getQueueStatus(req, res) {
+    const { queueId } = req.query;
+    if (!queueId) return res.status(400).json({ error: 'Missing queueId' });
+
+    const pos = getQueuePosition(queueId);
+    if (pos === -1) {
+      return res.json({ status: 'not_found' });
+    }
+    const qItem = scrapingQueue.find(q => q.queueId === queueId);
+    
+    // Si c'est notre tour et que personne d'autre ne tourne
+    if (qItem.status === 'ready' && !globalScrapingActive) {
+      return res.json({ status: 'ready' });
+    }
+
+    return res.json({ status: 'waiting', position: pos + 1 });
+  } // <-- AJOUT DE L'ACCOLADE MANQUANTE ICI
+
+  async removeQueue(req, res) {
+    const { queueId } = req.body;
+    if (!queueId) return res.status(400).json({ error: 'Missing queueId' });
+    
+    removeFromQueue(queueId);
+    console.log(`📋 Annulation file d'attente pour queueId: ${queueId}`);
+    res.json({ success: true });
   }
 }
 

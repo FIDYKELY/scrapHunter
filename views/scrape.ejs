@@ -809,7 +809,35 @@
         </div>
     </div>
 
+    <!-- ── MODAL FILE D'ATTENTE ── -->
+    <div class="modal-overlay" id="queueModal">
+        <div class="modal-content">
+            <div class="modal-icon" style="color: #667eea; font-size: 3rem;">⏳</div>
+            <div class="modal-title">Scraping en file d'attente</div>
+            <div class="modal-text">
+                Un autre processus modifie actuellement la base. Votre scraping démarrera automatiquement dès que possible.<br><br>
+                <strong style="color: #333; font-size: 1.1em;">Position actuelle : <span id="queuePosition">...</span></strong>
+            </div>
+            <div class="modal-buttons" style="margin-top: 20px;">
+                <button class="modal-btn modal-btn-cancel" id="cancelQueueBtn" style="width: 100%;">Annuler l'attente</button>
+            </div>
+        </div>
+    </div>
+
     <script>
+        const LS_KEY = 'scrapHunter_state';
+
+        // ── localStorage helpers ─────────────────────────────────────────
+        function saveScrapingState(state) {
+            try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
+        }
+        function loadScrapingState() {
+            try { return JSON.parse(localStorage.getItem(LS_KEY) || 'null'); } catch(e) { return null; }
+        }
+        function clearScrapingState() {
+            try { localStorage.removeItem(LS_KEY); } catch(e) {}
+        }
+
         let isScraping = false;
         let logPollingInterval = null;
         let lastLogTimestamp = null;
@@ -1069,7 +1097,7 @@
         // Reset button
         resetButton.addEventListener('click', resetScrapingStatus);
 
-        async function startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId = null, destGoogleSheets = true, destHubSpot = false) {
+        async function startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId = null, destGoogleSheets = true, destHubSpot = false, queueId = null) {
             isScraping = true;
             button.disabled = true;
             button.style.display = 'none';
@@ -1077,6 +1105,18 @@
             stopButton.disabled = false;
             stopButton.textContent = 'Arrêter le processus';
             statusCard.classList.add('active');
+
+            // 💾 Sauvegarder l'état dans localStorage
+            saveScrapingState({
+                isRunning: true,
+                keyword,
+                sources,
+                departments: selectedDepartments,
+                sheetId,
+                destGoogleSheets,
+                destHubSpot,
+                startTime: new Date().toISOString()
+            });
 
             let statusText = enableEnrichment ?
                 `Scraping ${keyword} from ${sources.join(', ')} with enrichment...` :
@@ -1105,11 +1145,81 @@
                         departments:      selectedDepartments,
                         sheetId,
                         destGoogleSheets,
-                        destHubSpot
+                        destHubSpot,
+                        queueId // Ajouté pour la gestion de file d'attente
                     })
                 });
 
                 const result = await response.json();
+
+                // ── GESTION DE LA FILE D'ATTENTE (QUEUE) ──
+                if (result.queued) {
+                    // Arrêter les logs pour l'instant
+                    stopLogPolling();
+                    updateStatus('warning', '⏳ En file d\'attente', `Position : ${result.position}`);
+                    
+                    const queueModal = document.getElementById('queueModal');
+                    const queuePosition = document.getElementById('queuePosition');
+                    queuePosition.textContent = result.position;
+                    queueModal.classList.add('active');
+
+                    // Sauvegarder l'état dans localStorage
+                    localStorage.setItem('scrapingQueueState', JSON.stringify({
+                        queueId: result.queueId,
+                        keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot
+                    }));
+
+                    // Polling sur le statut de la queue
+                    const checkQueue = setInterval(async () => {
+                        try {
+                            const qRes = await fetch(`/scrape/queue-status?queueId=${result.queueId}`);
+                            const qData = await qRes.json();
+                            
+                            if (qData.status === 'ready') {
+                                clearInterval(checkQueue);
+                                queueModal.classList.remove('active');
+                                localStorage.removeItem('scrapingQueueState');
+                                // C'est notre tour, on rappelle startScraping avec queueId
+                                startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot, result.queueId);
+                            } else if (qData.status === 'waiting') {
+                                queuePosition.textContent = qData.position;
+                                updateStatus('warning', '⏳ En file d\'attente', `Position : ${qData.position}`);
+                            } else {
+                                // not_found ou erreur : on annule
+                                clearInterval(checkQueue);
+                                queueModal.classList.remove('active');
+                                localStorage.removeItem('scrapingQueueState');
+                                resetScrapingStatus();
+                                alert("La session en file d'attente a expiré ou été perdue.");
+                            }
+                        } catch(e) { console.error('Erreur polling file attente', e); }
+                    }, 3000); // vérifie toutes les 3s
+                    
+                    // Gestionnaire du bouton Annuler dans la modal de queue
+                    const cancelBtn = document.getElementById('cancelQueueBtn');
+                    // Retirer les anciens event listeners (au cas où on passe plusieurs fois ici)
+                    const newCancelBtn = cancelBtn.cloneNode(true);
+                    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+                    
+                    newCancelBtn.addEventListener('click', async () => {
+                        clearInterval(checkQueue);
+                        queueModal.classList.remove('active');
+                        localStorage.removeItem('scrapingQueueState');
+                        try {
+                            await fetch('/scrape/queue-cancel', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ queueId: result.queueId })
+                            });
+                        } catch (e) {
+                            console.error('Erreur lors de l\'annulation de la file', e);
+                        }
+                        resetScrapingStatus();
+                    });
+
+                    // Fin temporaire de cette exécution, on attend que le polling relance
+                    return; 
+                }
 
                 if (result.success) {
                     const processingMode = oneByOneProcessing ? 'one by one' : 'in batch';
@@ -1136,6 +1246,7 @@
                 progressFill.style.width = '0%';
             } finally {
                 isScraping = false;
+                clearScrapingState(); // 🧹 Nettoyer localStorage après la fin
                 button.disabled = false;
                 button.style.display = 'inline-block';
                 stopButton.style.display = 'none';
@@ -1262,6 +1373,8 @@
 
         function resetScrapingStatus() {
             fetch('/scrape/reset', { method: 'POST' });
+            clearScrapingState(); // 🧹 Nettoyer localStorage principal
+            localStorage.removeItem('scrapingQueueState'); // 🧹 Nettoyer localStorage de queue
             
             statusCard.classList.remove('active');
             progressFill.style.width = '0%';
@@ -1298,36 +1411,121 @@
             stopButton.style.display = 'none';
         }
 
-        // Check for existing status on page load
+        // ── Reconnexion automatique au chargement ───────────────────────
+        // Restaure les champs du formulaire depuis un état localStorage sauvegardé
+        function restoreFormFromState(ls) {
+            // Mot-clé
+            if (ls.keyword) {
+                const kwEl = document.getElementById('keyword');
+                if (kwEl) kwEl.value = ls.keyword;
+            }
+            // Sources (checkboxes)
+            if (ls.sources && ls.sources.length > 0) {
+                document.querySelectorAll('input[name="source"]').forEach(cb => {
+                    cb.checked = ls.sources.includes(cb.value);
+                });
+            }
+            // Départements (checkboxes)
+            if (ls.departments && ls.departments.length > 0) {
+                document.querySelectorAll('input[name="departments"]').forEach(cb => {
+                    cb.checked = ls.departments.includes(cb.value);
+                });
+                updateSelectedCount();
+            }
+        }
+
         async function checkStatus() {
             try {
                 const response = await fetch('/scrape/status');
                 const status = await response.json();
+
+                // Scraping actif côté serveur → reconnecter l'UI
                 if (status.isRunning) {
                     statusCard.classList.add('active');
-                    updateStatus('loading', 'Scraping in progress...', `Scraping ${status.keyword} from ${status.source}...`);
+                    const srcLabel = Array.isArray(status.source) ? status.source.join(', ') : status.source;
+                    updateStatus('loading', 'Scraping in progress...',
+                        `Scraping ${status.keyword} from ${srcLabel}...`);
+                    progressFill.style.width = '50%';
+                    button.disabled = true;
+                    button.style.display = 'none';
+                    stopButton.style.display = 'inline-block';
+                    stopButton.disabled = false;
+                    stopButton.textContent = 'Arrêter le processus';
+                    isScraping = true;
+
+                    // Restaurer / créer l'état localStorage
+                    let ls = loadScrapingState();
+                    if (!ls) {
+                        ls = {
+                            isRunning: true,
+                            keyword: status.keyword,
+                            sources: Array.isArray(status.source) ? status.source : [status.source],
+                            departments: status.departments || [],
+                            sheetId: status.sheetId || null,
+                            destGoogleSheets: status.destGoogleSheets !== false,
+                            destHubSpot: !!status.destHubSpot,
+                            startTime: status.startTime || new Date().toISOString()
+                        };
+                        saveScrapingState(ls);
+                    }
+                    // Repopuler le formulaire avec les valeurs sauvegardées
+                    restoreFormFromState(ls);
+                    startLogPolling();
+                    return;
+                }
+
+                // Scraping terminé côté serveur → juste nettoyer localStorage, ne rien afficher
+                const ls = loadScrapingState();
+                if (ls && !status.isRunning) {
+                    clearScrapingState();
+                }
+
+            } catch (error) {
+                console.error('Error checking status:', error);
+
+                // Côté serveur injoignable — utiliser localStorage comme dernier recours
+                const ls = loadScrapingState();
+                if (ls && ls.isRunning) {
+                    statusCard.classList.add('active');
+                    updateStatus('warning', '⚠️ Serveur injoignable',
+                        `Un scraping sur « ${ls.keyword} » était en cours. Vérifiez le serveur.`);
                     progressFill.style.width = '50%';
                     button.disabled = true;
                     isScraping = true;
-
-                    // Start log polling if scraping is running
-                    startLogPolling();
                 }
-
-                if (status.spreadsheetUrl) {
-                    leadsCount.textContent = status.leadsCount;
-                    sheetLink.href = status.spreadsheetUrl;
-                    resultsSection.style.display = 'block';
-                    updateStatus('success', 'Scraping completed!', `Found ${status.leadsCount} leads`);
-                    progressFill.style.width = '100%';
-                }
-            } catch (error) {
-                console.error('Error checking status:', error);
             }
         }
 
         // Check status on page load
-        checkStatus();
+        async function completeLoadChecks() {
+            const savedQueue = localStorage.getItem('scrapingQueueState');
+            if (savedQueue) {
+                try {
+                    const qState = JSON.parse(savedQueue);
+                    const qRes = await fetch(`/scrape/queue-status?queueId=${qState.queueId}`);
+                    const qData = await qRes.json();
+                    
+                    if (qData.status === 'waiting' || qData.status === 'ready') {
+                        // Reprendre là où on en était
+                        startScraping(
+                            qState.keyword, qState.sources, qState.enableEnrichment,
+                            qState.oneByOneProcessing, qState.selectedDepartments,
+                            qState.sheetId, qState.destGoogleSheets, qState.destHubSpot, qState.queueId
+                        );
+                        return; // on ignore le checkStatus standard car on est en mode file d'attente
+                    } else {
+                        localStorage.removeItem('scrapingQueueState');
+                    }
+                } catch(e) {
+                    console.error('Erreur reconnexion file', e);
+                    localStorage.removeItem('scrapingQueueState');
+                }
+            }
+            // Si pas de file d'attente, on check normal
+            checkStatus();
+        }
+
+        completeLoadChecks();
         
         // Initialize departments on page load
         initializeDepartments();

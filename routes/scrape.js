@@ -85,5 +85,15 @@ router.get('/check-hubspot', isAuthenticatedAPI, (req, res) => {
   scrapeController.checkHubSpot(req, res);
 });
 
+// Statut de la file d'attente
+router.get('/queue-status', isAuthenticatedAPI, (req, res) => {
+  scrapeController.getQueueStatus(req, res);
+});
+
+// Annuler une file d'attente
+router.post('/queue-cancel', isAuthenticatedAPI, (req, res) => {
+  scrapeController.removeQueue(req, res);
+});
+
 module.exports = router;
 
