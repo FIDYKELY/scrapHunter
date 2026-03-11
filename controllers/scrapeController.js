@@ -1,5 +1,5 @@
 // controllers/scrapeController.js
-const legacyScraper  = require('../services/legacyScraper');
+const legacyScraper = require('../services/legacyScraper');
 const hubspotService = require('../services/hubspotService');
 const { v4: uuidv4 } = require('uuid');
 
@@ -9,13 +9,13 @@ class ScrapeController {
     const {
       keyword,
       source,               // peut être string (compat) ou array
-      enableEnrichment    = true,
-      enableN8nSending    = true,
-      oneByOneProcessing  = true,
-      departments         = [],
-      sheetId             = null,
-      destGoogleSheets    = true,
-      destHubSpot         = false
+      enableEnrichment = true,
+      enableN8nSending = true,
+      oneByOneProcessing = true,
+      departments = [],
+      sheetId = null,
+      destGoogleSheets = true,
+      destHubSpot = false
     } = req.body;
 
     // Normaliser source en tableau (multi-source depuis les checkboxes)
@@ -31,6 +31,7 @@ class ScrapeController {
     }
 
     try {
+      const batchId = uuidv4(); // Generate a batch ID for cancellation
       console.log(`🚀 Starting scraping: keyword="${keyword}", sources="${sources.join(',')}", departments="${departments.length > 0 ? departments.join(',') : 'ALL'}"`);
       console.log(`📤 Destinations: Google Sheets=${destGoogleSheets}, HubSpot=${destHubSpot}`);
 
@@ -45,20 +46,31 @@ class ScrapeController {
         n8nEnabled: enableN8nSending && destGoogleSheets,
         oneByOneProcessing,
         destGoogleSheets,
-        destHubSpot
+        destHubSpot,
+        crawlBatchId: batchId // Store for cancellation
       };
+
+      // Force session save so parallel requests (like /stop or /status) can read it
+      // before the long await blocks the request completion.
+      await new Promise((resolve, reject) => {
+        req.session.save((err) => {
+          if (err) return reject(err);
+          resolve();
+        });
+      });
 
       // ── SCRAPING + ENRICHISSEMENT ─────────────────────────────────────
       // On désactive l'envoi n8n interne si Google Sheets n'est pas coché
       const results = await legacyScraper.mainProcess(keyword, sources, departments, {
         sheetId,
-        enableN8nSending: enableN8nSending && destGoogleSheets
+        enableN8nSending: enableN8nSending && destGoogleSheets,
+        crawlBatchId: batchId // Pass to scraper so it uses the same ID
       });
 
       const leads = results.leads || [];
 
       req.session.scrapingStatus.leadsCount = results.successful;
-      req.session.scrapingStatus.isRunning  = false;
+      req.session.scrapingStatus.isRunning = false;
       if (sheetId) req.session.scrapingStatus.sheetId = sheetId;
 
       // ── HUBSPOT ──────────────────────────────────────────────────────
@@ -73,17 +85,17 @@ class ScrapeController {
       const stats = this.calculateStats(leads);
 
       return res.json({
-        success:           true,
-        message:           `${results.successful} leads traités avec succès`,
-        leadsCount:        results.successful,
+        success: true,
+        message: `${results.successful} leads traités avec succès`,
+        leadsCount: results.successful,
         keyword,
         source: sources,
-        enrichment:        enableEnrichment,
-        n8nSending:        enableN8nSending && destGoogleSheets,
+        enrichment: enableEnrichment,
+        n8nSending: enableN8nSending && destGoogleSheets,
         oneByOneProcessing,
         stats,
-        hubspot:           hubspotStats,
-        processingTime:    Math.round((Date.now() - req.session.scrapingStatus.startTime.getTime()) / 1000)
+        hubspot: hubspotStats,
+        processingTime: Math.round((Date.now() - req.session.scrapingStatus.startTime.getTime()) / 1000)
       });
 
     } catch (error) {
