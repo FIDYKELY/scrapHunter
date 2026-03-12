@@ -41,7 +41,7 @@ const CUSTOM_PROPS = new Set([
   'lead_priorite', 'linkedin_company_page', 'facebook_company_page',
   'instagram_company_page', 'external_lead_id', 'crawl_batch_id',
   'google_rating', 'google_reviews_count',
-  'siret', 'siren', 'statut_juridique', 'societe_url'
+  'siret', 'siren', 'societe_url'
 ]);
 
 // Retourne un objet sans les propriétés custom
@@ -104,13 +104,15 @@ function sanitizeName(raw) {
 function buildCompanyProps(lead) {
   const props = {
     name:    sanitizeName(lead.nom_entreprise),
-    city:    lead.ville            || '',
-    zip:     lead.code_postal      || '',
     country: 'France',
     address: lead.adresse_complete || '',
     phone:   lead.telephone        || '',
     website: lead.site_web         || ''
   };
+  // city/zip : envoyés seulement si non vides (HubSpot rejette les chaînes vides)
+  if (lead.ville?.trim())       props.city = lead.ville.trim();
+  if (lead.code_postal?.trim()) props.zip  = lead.code_postal.trim();
+
   // Propriétés custom (peuvent échouer si non créées dans le portail)
   if (lead.departement)          props.lead_departement       = lead.departement;
   if (lead.source)               props.lead_source            = lead.source;
@@ -125,8 +127,9 @@ function buildCompanyProps(lead) {
   if (lead.google_rating)        props.google_rating          = String(lead.google_rating);
   if (lead.siret)                props.siret                  = lead.siret;
   if (lead.siren)                props.siren                  = lead.siren;
-  if (lead.statut_juridique)     props.statut_juridique        = lead.statut_juridique;
-  if (lead.societe_url)          props.societe_url             = lead.societe_url;
+  if (lead.societe_url)          props.societe_url            = lead.societe_url;
+  // statut_juridique NON envoyé : HubSpot attend SARL/SAS/... pas ACTIVE/UNKNOWN
+  // → stocké dans la note de fallback (buildNoteText)
   return props;
 }
 
@@ -136,11 +139,11 @@ function buildContactProps(lead) {
     lastname:       '',
     company:        sanitizeName(lead.nom_entreprise) || '',
     phone:          lead.telephone      || '',
-    city:           lead.ville          || '',
-    zip:            lead.code_postal    || '',
     country:        'France',
     hs_lead_status: 'NEW'
   };
+  if (lead.ville?.trim())       props.city = lead.ville.trim();
+  if (lead.code_postal?.trim()) props.zip  = lead.code_postal.trim();
   const cleanEmail = sanitizeEmail(lead.email);
   if (cleanEmail)                props.email            = cleanEmail;
   else if (lead.email)           logWarning(`HubSpot: email invalide ignoré pour ${sanitizeName(lead.nom_entreprise)}: ${lead.email}`);
@@ -210,13 +213,16 @@ async function createNoteForCompany(companyId, noteBody) {
 // ─────────────────────────────────────────────
 async function findExistingCompany(lead) {
   try {
-    // Cherche par nom + ville (external_lead_id peut ne pas exister comme propriété)
     if (lead.nom_entreprise) {
+      const filters = [
+        { propertyName: 'name', operator: 'EQ', value: sanitizeName(lead.nom_entreprise) }
+      ];
+      // Ajouter city seulement si non vide (HubSpot rejette les valeurs vides)
+      if (lead.ville?.trim()) {
+        filters.push({ propertyName: 'city', operator: 'EQ', value: lead.ville.trim() });
+      }
       const r = await hsRequest('POST', '/crm/v3/objects/companies/search', {
-        filterGroups: [{ filters: [
-          { propertyName: 'name', operator: 'EQ', value: sanitizeName(lead.nom_entreprise) },
-          { propertyName: 'city', operator: 'EQ', value: lead.ville || '' }
-        ]}],
+        filterGroups: [{ filters }],
         properties: ['hs_object_id', 'name']
       });
       if (r.results?.length) return r.results[0];

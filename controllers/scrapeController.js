@@ -117,7 +117,8 @@ class ScrapeController {
       const results = await legacyScraper.mainProcess(keyword, sources, departments, {
         sheetId,
         enableN8nSending: enableN8nSending && destGoogleSheets,
-        crawlBatchId: batchId // Pass to scraper so it uses the same ID
+        enableHubSpot:    destHubSpot,   // envoi immédiat lead par lead
+        crawlBatchId:     batchId
       });
 
       const leads = results.leads || [];
@@ -155,12 +156,14 @@ class ScrapeController {
       req.session.scrapingStatus.isRunning = false;
       if (sheetId) req.session.scrapingStatus.sheetId = sheetId;
 
-      // ── HUBSPOT ──────────────────────────────────────────────────────
+      // ── HUBSPOT ── (envoi déjà effectué lead par lead dans processLead)
       let hubspotStats = null;
       if (destHubSpot && leads.length > 0) {
-        console.log(`🟠 Envoi HubSpot: ${leads.length} leads`);
-        hubspotStats = await hubspotService.sendLeadsToHubSpot(leads);
-        console.log(`✅ HubSpot: créés=${hubspotStats.created} mis-à-jour=${hubspotStats.updated} échoués=${hubspotStats.failed}`);
+        const sent    = leads.filter(l => l.hubspot_company_id).length;
+        const skipped = leads.filter(l => l.status === 'SKIPPED_INACTIVE').length;
+        const failed  = leads.filter(l => !l.hubspot_company_id && l.status !== 'SKIPPED_INACTIVE').length;
+        hubspotStats  = { sent, skipped, failed, note: 'Envoi effectué en temps réel' };
+        console.log(`🟠 HubSpot: ${sent} lead(s) envoyés en temps réel, ${skipped} ignorés (inactifs), ${failed} échecs`);
       }
 
       // ── STATS ─────────────────────────────────────────────────────────

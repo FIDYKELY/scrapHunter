@@ -38,6 +38,7 @@ async function cancellableSleep(ms, crawlBatchId) {
 // ─────────────────────────────────────────────
 const { logInfo, logWarning, logError } = require('../utils/logger');
 const { checkCompanyStatus } = require('./societeService');
+const { sendLeadToHubSpot }   = require('./hubspotService');
 
 // ─────────────────────────────────────────────
 // RATE LIMITER
@@ -1264,9 +1265,10 @@ function generateTestData(keyword, count = 5) {
 async function processLead(lead, options = {}) {
   const {
     enableWebsiteEnrichment = true,
-    enableSocialEnrichment = true,
-    enableN8nSending = true,
-    crawlBatchId = null
+    enableSocialEnrichment  = true,
+    enableN8nSending        = true,
+    enableHubSpot           = false,  // envoi HubSpot immédiat, lead par lead
+    crawlBatchId            = null
   } = options;
 
   if (crawlBatchId && cancelledBatches.has(crawlBatchId)) {
@@ -1336,6 +1338,26 @@ async function processLead(lead, options = {}) {
     }
   }
 
+  // Étape 6 — Envoi HubSpot immédiat (même logique que n8n, lead par lead)
+  if (enableHubSpot) {
+    try {
+      const hsResult = await sendLeadToHubSpot(lead);
+      if (hsResult.success) {
+        logInfo(`🟠 HubSpot: lead ${hsResult.action} — "${lead.nom_entreprise}"`, { companyId: hsResult.companyId });
+        lead.hubspot_company_id = hsResult.companyId || null;
+        lead.hubspot_contact_id = hsResult.contactId || null;
+        if (!enableN8nSending) {
+          lead.status           = 'SENT_TO_HUBSPOT';
+          lead.last_action_date = new Date().toISOString();
+        }
+      } else {
+        logError(`Erreur envoi HubSpot: ${hsResult.error} — "${lead.nom_entreprise}"`);
+      }
+    } catch (err) {
+      logError(`Erreur envoi HubSpot: ${err.message} — "${lead.nom_entreprise}"`);
+    }
+  }
+
   return lead;
 }
 
@@ -1351,6 +1373,7 @@ async function mainProcess(keyword, sources, departments = [], options = {}) {
     enableWebsiteEnrichment = true,
     enableSocialEnrichment = true,
     enableN8nSending = true,
+    enableHubSpot    = false,
     concurrency = 2,
     delayBetweenLeads = 8000,
     maxPagesPerDept = 1,
@@ -1422,7 +1445,7 @@ async function mainProcess(keyword, sources, departments = [], options = {}) {
           if (await cancellableSleep(2000, crawlBatchId)) return Promise.reject(new Error('CANCELLED'));
         }
 
-        return processLead(lead, { enableWebsiteEnrichment, enableSocialEnrichment, enableN8nSending, crawlBatchId });
+        return processLead(lead, { enableWebsiteEnrichment, enableSocialEnrichment, enableN8nSending, enableHubSpot, crawlBatchId });
       })
     );
 
