@@ -40,7 +40,8 @@ const CUSTOM_PROPS = new Set([
   'lead_departement', 'lead_source', 'lead_type_profil', 'lead_score',
   'lead_priorite', 'linkedin_company_page', 'facebook_company_page',
   'instagram_company_page', 'external_lead_id', 'crawl_batch_id',
-  'google_rating', 'google_reviews_count'
+  'google_rating', 'google_reviews_count',
+  'siret', 'siren', 'statut_juridique', 'societe_url'
 ]);
 
 // Retourne un objet sans les propriétés custom
@@ -64,6 +65,10 @@ function buildNoteText(lead) {
   if (lead.linkedin_company_url) lines.push(`LinkedIn: ${lead.linkedin_company_url}`);
   if (lead.facebook_url)         lines.push(`Facebook: ${lead.facebook_url}`);
   if (lead.instagram_url)        lines.push(`Instagram: ${lead.instagram_url}`);
+  if (lead.siret)                lines.push(`SIRET: ${lead.siret}`);
+  if (lead.siren)                lines.push(`SIREN: ${lead.siren}`);
+  if (lead.statut_juridique)     lines.push(`Statut INSEE: ${lead.statut_juridique}`);
+  if (lead.societe_url)          lines.push(`Fiche INSEE: ${lead.societe_url}`);
   return lines.join('\n');
 }
 
@@ -118,6 +123,10 @@ function buildCompanyProps(lead) {
   if (lead.lead_id)              props.external_lead_id       = lead.lead_id;
   if (lead.crawl_batch_id)       props.crawl_batch_id         = lead.crawl_batch_id;
   if (lead.google_rating)        props.google_rating          = String(lead.google_rating);
+  if (lead.siret)                props.siret                  = lead.siret;
+  if (lead.siren)                props.siren                  = lead.siren;
+  if (lead.statut_juridique)     props.statut_juridique        = lead.statut_juridique;
+  if (lead.societe_url)          props.societe_url             = lead.societe_url;
   return props;
 }
 

@@ -57,23 +57,27 @@ class ScrapeController {
     }
 
     // ── GESTION DE LA FILE D'ATTENTE ───────────────────────────────────
-    if (globalScrapingActive) {
-      // Si c'est un retour de queue : vérifier que c'est bien son tour
-      if (queueId) {
-        const pos = getQueuePosition(queueId);
-        if (pos !== 0) {
-          // Pas encore son tour, renvoyer sa position actuelle
-          return res.json({ queued: true, position: pos + 1, queueId });
-        }
-        // C'est son tour : on le retire de la queue et on continue
-        removeFromQueue(queueId);
-      } else {
-        // Nouvelle demande : placer en queue et répondre immédiatement
-        const queued = enqueue({ keyword, source, enableEnrichment, enableN8nSending,
-          oneByOneProcessing, departments, sheetId, destGoogleSheets, destHubSpot });
-        console.log(`📋 Scraping en file d'attente — position ${queued.position} (queueId: ${queued.queueId})`);
-        return res.json({ queued: true, position: queued.position, queueId: queued.queueId });
+    if (queueId) {
+      // Retour d'un client en file d'attente : vérifier double condition
+      // 1. Il doit être en position 0 (premier de la file)
+      // 2. Le scraping actif doit être libéré (globalScrapingActive === false)
+      const pos = getQueuePosition(queueId);
+      if (pos === -1) {
+        // queueId inconnu (expiré ou annulé) : refuser
+        return res.status(409).json({ error: 'queueId inconnu ou expiré' });
       }
+      if (pos !== 0 || globalScrapingActive) {
+        // Pas encore son tour : renvoyer sa position actuelle
+        return res.json({ queued: true, position: pos + 1, queueId });
+      }
+      // C'est son tour ET le serveur est libre : retirer de la queue et continuer
+      removeFromQueue(queueId);
+    } else if (globalScrapingActive) {
+      // Nouvelle demande alors qu'un scraping est actif : mettre en file
+      const queued = enqueue({ keyword, source, enableEnrichment, enableN8nSending,
+        oneByOneProcessing, departments, sheetId, destGoogleSheets, destHubSpot });
+      console.log(`📋 Scraping en file d'attente — position ${queued.position} (queueId: ${queued.queueId})`);
+      return res.json({ queued: true, position: queued.position, queueId: queued.queueId });
     }
 
     // ── DÉMARRAGE ──────────────────────────────────────────────────────
@@ -119,6 +123,35 @@ class ScrapeController {
       const leads = results.leads || [];
 
       req.session.scrapingStatus.leadsCount = results.successful;
+      
+      // Vérifier si le processus a été annulé avant de continuer
+      const isCancelled = !!results.cancelled || legacyScraper.isCancelled(batchId);
+      if (isCancelled) {
+        req.session.scrapingStatus.isRunning = false;
+        req.session.scrapingStatus.error = 'Scraping arrêté par l\'utilisateur';
+        console.log(`🛑 Processus annulé, arrêt avant envoi HubSpot`);
+        
+        // Libérer la variable globale et la file d'attente
+        globalScrapingActive = false;
+        dequeueNext();
+        
+        return res.json({
+          success: true,
+          message: `${results.successful} leads récupérés mais processus arrêté`,
+          leadsCount: results.successful,
+          keyword,
+          source: sources,
+          enrichment: enableEnrichment,
+          n8nSending: false, // Pas d'envoi si annulé
+          oneByOneProcessing,
+          stats: this.calculateStats(leads),
+          spreadsheetUrl: sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : null,
+          hubspot: null, // Pas d'envoi HubSpot si annulé
+          processingTime: Math.round((Date.now() - req.session.scrapingStatus.startTime.getTime()) / 1000),
+          cancelled: true // Indiquer que c'est un arrêt manuel
+        });
+      }
+      
       req.session.scrapingStatus.isRunning = false;
       if (sheetId) req.session.scrapingStatus.sheetId = sheetId;
 
@@ -237,6 +270,19 @@ class ScrapeController {
       if (typeof legacyScraper.cancelScrape === 'function') {
         legacyScraper.cancelScrape(batchId);
       }
+      
+      // Mettre à jour l'état de la session pour que le frontend détecte l'arrêt
+      req.session.scrapingStatus.isRunning = false;
+      req.session.scrapingStatus.error = 'Scraping arrêté par l\'utilisateur';
+      
+      // Libérer la variable globale pour permettre aux nouveaux scrapings de démarrer
+      globalScrapingActive = false;
+      
+      // Forcer la sauvegarde de la session
+      req.session.save((err) => {
+        if (err) console.error('Erreur sauvegarde session:', err);
+      });
+      
       res.json({ success: true, message: 'Stop signal sent' });
     } else {
       res.status(400).json({ error: 'No active scraping process found in session.' });
