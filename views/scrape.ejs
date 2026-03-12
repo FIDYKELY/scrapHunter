@@ -1155,7 +1155,14 @@
             let sheetId = null;
             if (destGoogleSheets) {
                 try {
-                    const sheetResp = await fetch('/scrape/create-sheet', { method: 'POST' });
+                    const sheetResp = await fetch('/scrape/create-sheet', { 
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            keyword,
+                            userEmail: '<%= user.email %>'
+                        })
+                    });
                     const sheetData = await sheetResp.json();
                     if (sheetData && sheetData.spreadsheetId) sheetId = sheetData.spreadsheetId;
                 } catch (err) {
@@ -1458,19 +1465,40 @@
             if (destHS && result.hubspot) {
                 hsEl.style.display = 'block';
                 const hs = result.hubspot;
-                if (hs.failed === 0) {
-                    hsEl.className = 'dest-result-block ok';
-                    hsEl.innerHTML = `<strong>🟠 HubSpot CRM</strong>${hs.created} créés, ${hs.updated} mis à jour`;
-                } else {
-                    hsEl.className = 'dest-result-block error';
-                    let errHtml = `<strong>🟠 HubSpot CRM</strong>${hs.created} créés, ${hs.updated} mis à jour, <span style="color:#dc3545">${hs.failed} échouées</span>`;
-                    if (hs.errors?.length) {
-                        errHtml += `<ul style="margin:.3rem 0 0 1rem;font-size:.8rem;color:#721c24">`;
-                        hs.errors.slice(0, 3).forEach(e => { errHtml += `<li>${e}</li>`; });
-                        if (hs.errors.length > 3) errHtml += `<li>…et ${hs.errors.length - 3} autre(s)</li>`;
-                        errHtml += '</ul>';
+                
+                // Nouveau format : sent, skipped, failed
+                if (hs.sent !== undefined) {
+                    let message = `<strong>🟠 HubSpot CRM</strong>${hs.sent} envoyés`;
+                    if (hs.skipped > 0) message += `, ${hs.skipped} ignorés (inactifs)`;
+                    if (hs.failed > 0) {
+                        hsEl.className = 'dest-result-block error';
+                        message += `, <span style="color:#dc3545">${hs.failed} échoués</span>`;
+                    } else {
+                        hsEl.className = 'dest-result-block ok';
                     }
-                    hsEl.innerHTML = errHtml;
+                    hsEl.innerHTML = message;
+                }
+                // Ancien format : created, updated (compatibilité)
+                else if (hs.created !== undefined) {
+                    if (hs.failed === 0) {
+                        hsEl.className = 'dest-result-block ok';
+                        hsEl.innerHTML = `<strong>🟠 HubSpot CRM</strong>${hs.created} créés, ${hs.updated} mis à jour`;
+                    } else {
+                        hsEl.className = 'dest-result-block error';
+                        let errHtml = `<strong>🟠 HubSpot CRM</strong>${hs.created} créés, ${hs.updated} mis à jour, <span style="color:#dc3545">${hs.failed} échouées</span>`;
+                        if (hs.errors?.length) {
+                            errHtml += `<ul style="margin:.3rem 0 0 1rem;font-size:.8rem;color:#721c24">`;
+                            hs.errors.slice(0, 3).forEach(e => { errHtml += `<li>${e}</li>`; });
+                            if (hs.errors.length > 3) errHtml += `<li>…et ${hs.errors.length - 3} autre(s)</li>`;
+                            errHtml += '</ul>';
+                        }
+                        hsEl.innerHTML = errHtml;
+                    }
+                }
+                // Format inconnu
+                else {
+                    hsEl.className = 'dest-result-block error';
+                    hsEl.innerHTML = `<strong>🟠 HubSpot CRM</strong>Format de résultat inconnu`;
                 }
             } else if (destHS && !result.hubspot) {
                 hsEl.style.display = 'block';

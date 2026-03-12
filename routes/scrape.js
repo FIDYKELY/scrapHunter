@@ -62,8 +62,17 @@ router.get('/logs', isAuthenticatedAPI, (req, res) => {
 // create sheet via webhook and return the sheet ID
 router.post("/create-sheet", isAuthenticatedAPI, async (req, res) => {
   try {
+    const { keyword, userEmail } = req.body || {};
+    const currentUserEmail = req.session.userEmail || userEmail || null;
+
+    const payload = {
+      keyword: keyword || null,
+      userEmail: currentUserEmail
+    };
+
     const response = await axios.post(
-      "https://n8n.trouvezpourmoi.com/webhook/522ca5c1-15be-44cb-abdd-d9636a503015"
+      "https://n8n.trouvezpourmoi.com/webhook/522ca5c1-15be-44cb-abdd-d9636a503015",
+      payload
     );
 
     const spreadsheetId = response.data.spreadsheetId;
