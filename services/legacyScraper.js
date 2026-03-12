@@ -328,8 +328,12 @@ function getDepartmentBbox(dept) {
   return '41.0,-5.0,51.0,10.0'; // France métropolitaine par défaut
 }
 
-function buildOverpassQuery(bbox) {
-  const keywordsPattern = REAL_ESTATE_KEYWORDS.join('|');
+function buildOverpassQuery(bbox, searchKeywords) {
+  // Si aucun mot-clé personnalisé n'est fourni, on garde la liste immobilière historique
+  const list = (searchKeywords && searchKeywords.length > 0)
+    ? searchKeywords
+    : REAL_ESTATE_KEYWORDS;
+  const keywordsPattern = list.join('|');
   return `
     [out:json][timeout:600];
     (
@@ -489,7 +493,7 @@ function buildLeadFromOsmResult(element, dept, crawlBatchId) {
 /**
  * Scrape un département OSM avec retry et gestion des zones
  */
-async function scrapeDepartmentOSM(dept, crawlBatchId) {
+async function scrapeDepartmentOSM(dept, crawlBatchId, searchKeywords) {
   let retryCount = 0;
   const maxRetries = 3;
 
@@ -511,7 +515,7 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
         while (zoneRetry < 2) {
           try {
             logInfo(`Requête Overpass dept=${dept} zone ${i + 1}/${bboxes.length}`);
-            const query = buildOverpassQuery(zoneBbox);
+            const query = buildOverpassQuery(zoneBbox, searchKeywords);
             const data = await executeOverpassQuery(query);
             if (data.elements && data.elements.length > 0) {
               totalElements = totalElements.concat(data.elements);
@@ -523,7 +527,7 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
             logWarning(`Erreur zone ${i + 1} (tentative ${zoneRetry}/2): ${err.message}`);
             if (zoneRetry >= 2) {
               try {
-                const data = await executeOverpassQuery(buildOverpassQuery(zoneBbox));
+                const data = await executeOverpassQuery(buildOverpassQuery(zoneBbox, searchKeywords));
                 if (data.elements) totalElements = totalElements.concat(data.elements);
               } catch (e2) { logError(`Échec complet zone ${i + 1}: ${e2.message}`); }
             } else {
@@ -570,9 +574,16 @@ async function scrapeDepartmentOSM(dept, crawlBatchId) {
 
 /**
  * Scrape OSM pour une liste de départements
+ * @param {string[]} departments
+ * @param {string} crawlBatchId
+ * @param {Object} options
+ * @param {string} options.keyword - mot-clé de recherche (ex: "dentiste")
  */
-async function scrapeOpenStreetMap(departments = DEPARTEMENTS_FRANCE, crawlBatchId) {
-  logInfo('Début scraping OpenStreetMap', { depts: departments });
+async function scrapeOpenStreetMap(departments = DEPARTEMENTS_FRANCE, crawlBatchId, options = {}) {
+  const { keyword = null } = options;
+  const searchKeywords = keyword ? [keyword] : null;
+
+  logInfo('Début scraping OpenStreetMap', { depts: departments, keyword });
   const allLeads = [];
   for (let i = 0; i < departments.length; i++) {
     if (cancelledBatches.has(crawlBatchId)) {
@@ -580,7 +591,7 @@ async function scrapeOpenStreetMap(departments = DEPARTEMENTS_FRANCE, crawlBatch
       break;
     }
     const dept = departments[i];
-    const leads = await scrapeDepartmentOSM(dept, crawlBatchId);
+    const leads = await scrapeDepartmentOSM(dept, crawlBatchId, searchKeywords);
     allLeads.push(...leads);
     if (i < departments.length - 1) {
       const delay = 30000 + Math.random() * 30000;
@@ -775,12 +786,17 @@ function buildLeadFromPagesJaunesDetail(details, dept, crawlBatchId, sourceUrl =
 
 /**
  * Scrape PagesJaunes pour une liste de départements
+ * @param {string[]} departments
+ * @param {string} crawlBatchId
+ * @param {Object} options
+ * @param {number} options.maxPagesPerDept
+ * @param {string} options.keyword - mot-clé de recherche (ex: "dentiste")
  */
 async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
-  const { maxPagesPerDept = 1 } = options;
+  const { maxPagesPerDept = 1, keyword = 'agence immobiliere' } = options;
   const targetDepts = departments.length > 0 ? departments : ['75', '69', '13', '31', '06', '92', '93', '94'];
 
-  logInfo(`PagesJaunes — ${targetDepts.length} département(s)`, { depts: targetDepts });
+  logInfo(`PagesJaunes — ${targetDepts.length} département(s)`, { depts: targetDepts, keyword });
   const allLeads = [];
 
   for (const dept of targetDepts) {
@@ -798,13 +814,14 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
       const page = await browser.newPage();
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
+      const encodedKeyword = encodeURIComponent(keyword || 'agence immobiliere');
       let baseUrl;
-      if (dept === '75') baseUrl = 'https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=paris-75';
-      else if (dept === '69') baseUrl = 'https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=lyon-69';
-      else if (dept === '13') baseUrl = 'https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=marseille-13';
+      if (dept === '75') baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodedKeyword}&ou=paris-75`;
+      else if (dept === '69') baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodedKeyword}&ou=lyon-69`;
+      else if (dept === '13') baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodedKeyword}&ou=marseille-13`;
       else {
         const city = DEPT_VILLE_MAPPING[dept] || dept.toLowerCase();
-        baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=agence+immobiliere&ou=${city}-${dept}`;
+        baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodedKeyword}&ou=${city}-${dept}`;
       }
 
       let pageNum = 1;
@@ -1396,10 +1413,11 @@ async function mainProcess(keyword, sources, departments = [], options = {}) {
     if (source === 'OpenStreetMap') {
       sourceLeads = await scrapeOpenStreetMap(
         departments.length > 0 ? departments : DEPARTEMENTS_FRANCE,
-        crawlBatchId
+        crawlBatchId,
+        { keyword }
       );
     } else if (source === 'PagesJaunes') {
-      sourceLeads = await scrapePagesJaunes(departments, crawlBatchId, { maxPagesPerDept });
+      sourceLeads = await scrapePagesJaunes(departments, crawlBatchId, { maxPagesPerDept, keyword });
     } else if (source === 'TEST_DATA') {
       sourceLeads = generateTestData(keyword, 5);
     } else {
