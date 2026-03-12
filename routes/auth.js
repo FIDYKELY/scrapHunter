@@ -17,11 +17,21 @@ router.get('/login', (req, res) => {
 router.post('/login', (req, res) => {
   const { email, password } = req.body;
   
-  // Static authentication (in production, use proper auth)
-  const adminEmail = process.env.ADMIN_EMAIL || 'admin@example.com';
-  const adminPassword = process.env.ADMIN_PASSWORD || 'admin123';
+  const authorizedUsers = [
+    {
+      email: process.env.ADMIN_EMAIL || 'admin@example.com',
+      password: process.env.ADMIN_PASSWORD || 'admin123'
+    },
+    {
+      email: process.env.ADMIN_EMAIL_2 || 'user2@example.com',
+      password: process.env.ADMIN_PASSWORD_2 || 'user2123'
+    }
+  ];
   
-  if (email === adminEmail && password === adminPassword) {
+  // Vérifier si l'utilisateur existe dans la liste
+  const user = authorizedUsers.find(u => u.email === email && u.password === password);
+  
+  if (user) {
     req.session.isAuthenticated = true;
     req.session.userEmail = email;
     res.redirect('/scrape');
