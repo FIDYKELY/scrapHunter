@@ -2,6 +2,7 @@
 // Version consolidée — intègre toute la logique de :
 //   1-scraping-openstreetmap.js, 1-scraping-pagesjaunes.js,
 //   2-enrichissement-site.js, 3-enrichissement-reseaux.js,
+//   2.5-enrichissement-google-maps.js,
 //   4-scoring.js, realtime-lead-processor.js, index.js
 // Mode sans BDD : scraping réel -> enrichissement -> scoring -> envoi n8n
 
@@ -38,7 +39,8 @@ async function cancellableSleep(ms, crawlBatchId) {
 // ─────────────────────────────────────────────
 const { logInfo, logWarning, logError } = require('../utils/logger');
 const { checkCompanyStatus } = require('./societeService');
-const { sendLeadToHubSpot }   = require('./hubspotService');
+const { sendLeadToHubSpot } = require('./hubspotService');
+const { enrichWithGoogleMaps } = require('./googleMapsService');
 
 // ─────────────────────────────────────────────
 // RATE LIMITER
@@ -334,12 +336,34 @@ function buildOverpassQuery(bbox, searchKeywords) {
     ? searchKeywords
     : REAL_ESTATE_KEYWORDS;
   const keywordsPattern = list.join('|');
+
+  // Vérifier si la recherche concerne l'immobilier pour inclure les tags OSM par défaut
+  let isRealEstate = (!searchKeywords || searchKeywords.length === 0);
+  if (!isRealEstate && searchKeywords) {
+    isRealEstate = searchKeywords.some(kw =>
+      REAL_ESTATE_KEYWORDS.some(rk => kw.toLowerCase().includes(rk.toLowerCase()) || rk.toLowerCase().includes(kw.toLowerCase()))
+    );
+  }
+
+  let tagQueries = '';
+  if (isRealEstate) {
+    OSM_TAGS.forEach(tag => {
+      const [k, v] = tag.split('=');
+      if (k && v) {
+        tagQueries += `
+      node["${k}"="${v}"](${bbox});
+      way["${k}"="${v}"](${bbox});
+      relation["${k}"="${v}"](${bbox});`;
+      }
+    });
+  }
+
   return `
     [out:json][timeout:600];
     (
       node["name"~"${keywordsPattern}", i](${bbox});
       way["name"~"${keywordsPattern}", i](${bbox});
-      relation["name"~"${keywordsPattern}", i](${bbox});
+      relation["name"~"${keywordsPattern}", i](${bbox});${tagQueries}
     );
     out body;
     >;
@@ -1277,15 +1301,15 @@ function generateTestData(keyword, count = 5) {
 // PROCESSUS PRINCIPAL
 // ─────────────────────────────────────────────
 /**
- * Traite un seul lead : enrichissement site → enrichissement social → scoring → envoi n8n
+ * Traite un seul lead : enrichissement site → enrichissement social → enrichissement Google Maps → scoring → envoi n8n
  */
 async function processLead(lead, options = {}) {
   const {
     enableWebsiteEnrichment = true,
-    enableSocialEnrichment  = true,
-    enableN8nSending        = true,
-    enableHubSpot           = false,  // envoi HubSpot immédiat, lead par lead
-    crawlBatchId            = null
+    enableSocialEnrichment = true,
+    enableN8nSending = true,
+    enableHubSpot = false,  // envoi HubSpot immédiat, lead par lead
+    crawlBatchId = null
   } = options;
 
   if (crawlBatchId && cancelledBatches.has(crawlBatchId)) {
@@ -1310,6 +1334,12 @@ async function processLead(lead, options = {}) {
     } catch (err) { logWarning(`Erreur enrichissement social: ${err.message}`); }
   }
 
+  // Étape 2.5 — Enrichissement Google Maps (pour leads pauvres uniquement)
+  try {
+    lead = await enrichWithGoogleMaps(lead);
+    if (crawlBatchId && cancelledBatches.has(crawlBatchId)) throw new Error('CANCELLED');
+  } catch (err) { logWarning(`Erreur enrichissement Google Maps: ${err.message}`); }
+
   // Étape 3 — Scoring
   lead = withUpdatedScore(lead);
   logInfo(`📊 Score: ${lead.score_global} (${lead.priorite}) — ${lead.nom_entreprise}`);
@@ -1320,10 +1350,10 @@ async function processLead(lead, options = {}) {
     const societeInfo = await checkCompanyStatus(lead);
 
     // Enrichir le lead avec les infos récupérées
-    lead.siret            = societeInfo.siret || null;
-    lead.siren            = societeInfo.siren || null;
+    lead.siret = societeInfo.siret || null;
+    lead.siren = societeInfo.siren || null;
     lead.statut_juridique = societeInfo.statut;       // 'ACTIVE' | 'INACTIVE' | 'UNKNOWN' | 'NOT_FOUND'
-    lead.societe_url      = societeInfo.sourceUrl || null;
+    lead.societe_url = societeInfo.sourceUrl || null;
 
     if (!societeInfo.active) {
       // Société inactive ou radiée → on skip l'envoi et on marque le lead
@@ -1364,7 +1394,7 @@ async function processLead(lead, options = {}) {
         lead.hubspot_company_id = hsResult.companyId || null;
         lead.hubspot_contact_id = hsResult.contactId || null;
         if (!enableN8nSending) {
-          lead.status           = 'SENT_TO_HUBSPOT';
+          lead.status = 'SENT_TO_HUBSPOT';
           lead.last_action_date = new Date().toISOString();
         }
       } else {
@@ -1390,7 +1420,7 @@ async function mainProcess(keyword, sources, departments = [], options = {}) {
     enableWebsiteEnrichment = true,
     enableSocialEnrichment = true,
     enableN8nSending = true,
-    enableHubSpot    = false,
+    enableHubSpot = false,
     concurrency = 2,
     delayBetweenLeads = 8000,
     maxPagesPerDept = 1,
