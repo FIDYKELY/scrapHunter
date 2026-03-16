@@ -771,6 +771,19 @@
                             <span>Processus menant un par un (recommandé pour n8n)</span>
                         </label>
                     </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="allPages" name="allPages" checked>
+                            <span>Toutes les pages disponibles (PagesJaunes)</span>
+                        </label>
+                        <div id="maxPagesContainer" style="display: none; margin-top: 10px;">
+                            <label for="maxPagesPerDept">Nombre de pages max par département:</label>
+                            <input type="number" id="maxPagesPerDept" name="maxPagesPerDept" min="1" max="200" value="5" class="form-control">
+                            <small style="color: #666; font-size: 0.85em; display: block; margin-top: 5px;">
+                                ⚠️ Attention: Paris = 131 pages ≈ plusieurs heures de scraping. Testez avec 5-10 pages d'abord.
+                            </small>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- ═══════════════════════════════════════════ -->
@@ -984,6 +997,14 @@
             // Update count on change
             departmentsGrid.addEventListener('change', updateSelectedCount);
             updateSelectedCount();
+
+            // Toggle max pages field
+            const allPagesCheckbox = document.getElementById('allPages');
+            const maxPagesContainer = document.getElementById('maxPagesContainer');
+            
+            allPagesCheckbox.addEventListener('change', () => {
+                maxPagesContainer.style.display = allPagesCheckbox.checked ? 'none' : 'block';
+            });
         }
 
         function selectAllDepartments() {
@@ -1144,6 +1165,10 @@
             const destGoogleSheets = document.getElementById('destGoogleSheets').checked;
             const destHubSpot = document.getElementById('destHubSpot').checked;
 
+            // PagesJaunes options
+            const allPages = document.getElementById('allPages').checked;
+            const maxPagesPerDept = allPages ? 0 : parseInt(document.getElementById('maxPagesPerDept').value) || 5;
+
             // Validation destinations
             if (!destGoogleSheets && !destHubSpot) {
                 document.getElementById('destError').style.display = 'block';
@@ -1170,7 +1195,7 @@
                 }
             }
 
-            startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot);
+            startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot, maxPagesPerDept);
         });
 
         // Custom Modal Logic
@@ -1236,7 +1261,7 @@
         // Reset button
         resetButton.addEventListener('click', resetScrapingStatus);
 
-        async function startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId = null, destGoogleSheets = true, destHubSpot = false, queueId = null) {
+        async function startScraping(keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId = null, destGoogleSheets = true, destHubSpot = false, maxPagesPerDept = 0, queueId = null) {
             button.disabled = true;
             statusCard.classList.add('active');
 
@@ -1271,6 +1296,7 @@
                         sheetId,
                         destGoogleSheets,
                         destHubSpot,
+                        maxPagesPerDept,
                         queueId
                     })
                 });
@@ -1331,7 +1357,7 @@
                 updateStatus('warning', '⏳ En file d\'attente', `Position : ${result.position}`);
                 localStorage.setItem('scrapingQueueState', JSON.stringify({
                     queueId: result.queueId,
-                    keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot
+                    keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot, maxPagesPerDept
                 }));
                 _startQueuePolling(result.queueId, result.position, keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot);
                 return;
@@ -1634,6 +1660,21 @@
                     cb.checked = ls.departments.includes(cb.value);
                 });
                 updateSelectedCount();
+            }
+            // PagesJaunes options
+            if (ls.maxPagesPerDept !== undefined) {
+                const allPagesCheckbox = document.getElementById('allPages');
+                const maxPagesInput = document.getElementById('maxPagesPerDept');
+                
+                if (ls.maxPagesPerDept === 0) {
+                    allPagesCheckbox.checked = true;
+                    maxPagesInput.value = 5;
+                    document.getElementById('maxPagesContainer').style.display = 'none';
+                } else {
+                    allPagesCheckbox.checked = false;
+                    maxPagesInput.value = ls.maxPagesPerDept;
+                    document.getElementById('maxPagesContainer').style.display = 'block';
+                }
             }
         }
 

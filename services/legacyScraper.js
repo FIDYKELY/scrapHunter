@@ -449,13 +449,9 @@ function buildAddressFromTags(tags) {
   return parts.join(', ');
 }
 
-function buildLeadFromOsmResult(element, dept, crawlBatchId) {
-  const tags = element.tags || {};
-  let lat = null, lng = null;
-  if (element.lat && element.lon) { lat = element.lat; lng = element.lon; }
-  else if (element.center) { lat = element.center.lat; lng = element.center.lon; }
-
-  const nom_entreprise = tags.name || tags.operator || tags.brand || 'Agence immobilière';
+function buildLeadFromOsmResult(tags, dept, crawlBatchId, sourceUrl) {
+  const nom_entreprise = tags.name || tags.operator || tags.brand || null;
+  if (!nom_entreprise) return null;
   const telephone = formatPhoneForSheets(tags.phone || tags['contact:phone'] || null);
   const site_web = tags.website || tags['contact:website'] || null;
   const email = normalizeEmail(tags.email || tags['contact:email'] || null);
@@ -574,6 +570,36 @@ async function scrapeDepartmentOSM(dept, crawlBatchId, searchKeywords) {
       for (const element of totalElements) {
         try {
           const lead = buildLeadFromOsmResult(element, dept, crawlBatchId);
+          if (!lead) continue;
+          
+          // Filtrage des faux positifs liés au mot-clé
+          if (searchKeywords && searchKeywords.length > 0) {
+            const nomLower = lead.nom_entreprise.toLowerCase();
+            const isRelevant = searchKeywords.some(kw => {
+              const kwLower = kw.toLowerCase();
+              // Vérifier que ce n'est pas un nom de rue/place
+              const isFakeLocation = /^(rue|place|avenue|boulevard|impasse|allée|chemin|passage|bus|ligne|arrêt)\b/i.test(lead.nom_entreprise);
+              if (isFakeLocation) return false;
+              
+              // Pour l'immobilier, on accepte aussi les noms d'agences connues même si le nom ne contient pas le mot-clé
+              const isRealEstateSearch = searchKeywords.some(kw => 
+                REAL_ESTATE_KEYWORDS.some(rk => kw.toLowerCase().includes(rk.toLowerCase()) || rk.toLowerCase().includes(kw.toLowerCase()))
+              );
+              
+              if (isRealEstateSearch) {
+                // Accepter si le nom contient le mot-clé OU si c'est une agence connue
+                const knownAgencies = /\b(century\s*21|orpi|foncia|laforet|guy\s*hoquet|era|remax|cfi\s*immobilier|stephane\s*plaza|l'adour|agence|immobilier|immobilière|real\s*estate|estate\s*agent)\b/i;
+                return nomLower.includes(kwLower) || knownAgencies.test(nomLower);
+              }
+              
+              return nomLower.includes(kwLower);
+            });
+            if (!isRelevant) {
+              logInfo(`⏭ Lead OSM ignoré (hors keyword): ${lead.nom_entreprise}`);
+              continue;
+            }
+          }
+          
           leads.push(lead);
           logInfo(`✅ Lead OSM: ${lead.nom_entreprise}`, {
             telephone: lead.telephone ? '✓' : '✗',
@@ -817,7 +843,9 @@ function buildLeadFromPagesJaunesDetail(details, dept, crawlBatchId, sourceUrl =
  * @param {string} options.keyword - mot-clé de recherche (ex: "dentiste")
  */
 async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
-  const { maxPagesPerDept = 1, keyword = 'agence immobiliere' } = options;
+  let { maxPagesPerDept = 0, keyword = 'agence immobiliere' } = options;
+  // 0 = toutes les pages disponibles
+  if (maxPagesPerDept === 0) maxPagesPerDept = Infinity;
   const targetDepts = departments.length > 0 ? departments : ['75', '69', '13', '31', '06', '92', '93', '94'];
 
   logInfo(`PagesJaunes — ${targetDepts.length} département(s)`, { depts: targetDepts, keyword });
@@ -869,6 +897,31 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
             await page.waitForSelector('.bi-list, .bi-liste, li[id^="bi-"]', { timeout: 10000 });
           } catch (_) { logWarning(`Timeout .bi-list dept=${dept}`); }
 
+          // Détecter le nombre total de pages (page 1 uniquement)
+          if (pageNum === 1) {
+            const totalPages = await page.evaluate(() => {
+              const paginationText = document.querySelector('.pagination-count, .results-count')?.textContent;
+              if (paginationText) {
+                const match = paginationText.match(/(\d+)\s*pages?/i);
+                return match ? parseInt(match[1]) : null;
+              }
+              
+              // Alternative: chercher le dernier numéro de page dans la pagination
+              const pageLinks = Array.from(document.querySelectorAll('a[href*="page="]'));
+              const pageNumbers = pageLinks.map(link => {
+                const href = link.getAttribute('href');
+                const match = href.match(/page=(\d+)/);
+                return match ? parseInt(match[1]) : 0;
+              }).filter(n => n > 0);
+              return pageNumbers.length > 0 ? Math.max(...pageNumbers) : null;
+            });
+            
+            if (totalPages) {
+              const displayMax = maxPagesPerDept === Infinity ? 'toutes' : maxPagesPerDept;
+              logInfo(`${totalPages} pages détectées pour dept=${dept} (max configuré: ${displayMax})`);
+            }
+          }
+
           if (await cancellableSleep(2000, crawlBatchId)) throw new Error('CANCELLED');
 
           // Récupérer les liens des fiches
@@ -906,7 +959,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
             if (await cancellableSleep(2000 + Math.random() * 3000, crawlBatchId)) break;
           }
 
-          hasNextPage = await page.evaluate(() => !!document.querySelector('a#pagination-next, a.next'));
+          hasNextPage = await page.evaluate(() => !!document.querySelector('a#pagination-next, a.next, a[aria-label*="Suivant"], a[aria-label*="Next"]'));
           pageNum++;
 
         } catch (err) {
@@ -1423,7 +1476,7 @@ async function mainProcess(keyword, sources, departments = [], options = {}) {
     enableHubSpot = false,
     concurrency = 2,
     delayBetweenLeads = 8000,
-    maxPagesPerDept = 1,
+    maxPagesPerDept = 0,
     sheetId = null,
     crawlBatchId = uuidv4()
   } = options;

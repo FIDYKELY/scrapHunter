@@ -43,6 +43,7 @@ class ScrapeController {
       sheetId = null,
       destGoogleSheets = true,
       destHubSpot = false,
+      maxPagesPerDept = 0,
       queueId = null        // présent si l'utilisateur reprend depuis la queue
     } = req.body;
 
@@ -118,6 +119,7 @@ class ScrapeController {
         sheetId,
         enableN8nSending: enableN8nSending && destGoogleSheets,
         enableHubSpot:    destHubSpot,   // envoi immédiat lead par lead
+        maxPagesPerDept: maxPagesPerDept || 0,
         crawlBatchId:     batchId
       });
 
