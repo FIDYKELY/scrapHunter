@@ -280,8 +280,8 @@ class ScrapeController {
       req.session.scrapingStatus.isRunning = false;
       req.session.scrapingStatus.error = 'Scraping arrêté par l\'utilisateur';
       
-      // Libérer la variable globale pour permettre aux nouveaux scrapings de démarrer
-      globalScrapingActive = false;
+      // NOTE: on ne remet PAS globalScrapingActive à false ici
+      // La libération est gérée par le finally de startScraping
       
       // Forcer la sauvegarde de la session
       req.session.save((err) => {

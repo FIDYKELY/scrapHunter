@@ -271,11 +271,24 @@ function calculateScore(lead) {
   let score = 0;
   const reasons = [];
 
+  // DEBUG : Afficher les données disponibles pour le scoring
+  logInfo(`🔍 DEBUG calculateScore pour ${lead.nom_entreprise}`, {
+    type_profil: lead.type_profil || null,
+    telephone: lead.telephone || null,
+    site_web: lead.site_web || null,
+    email: lead.email || null,
+    linkedin_company_url: lead.linkedin_company_url || null,
+    facebook_url: lead.facebook_url || null,
+    instagram_url: lead.instagram_url || null
+  });
+
   // 1. Profil cible (30 pts max)
   if (lead.type_profil === 'INDEPENDANT') {
     score += 20; reasons.push('Indépendant');
   } else if (lead.type_profil === 'MULTI_AGENCE') {
     score += 15; reasons.push('Multi-agence');
+  } else if (lead.type_profil === 'AGENCE_RESEAU') {
+    score += 10; reasons.push('Agence réseau');
   } else if (lead.type_profil === 'AGENCE_SIMPLE' || lead.type_profil === 'AGENCE') {
     score += 5; reasons.push('Agence');
   }
@@ -309,6 +322,12 @@ function calculateScore(lead) {
   if (lead.google_place_id) { score += 5; reasons.push('Fiche Google'); }
 
   const priorite = score >= 70 ? 'A' : score >= 50 ? 'B' : score >= 30 ? 'C' : 'D';
+
+  logInfo(`🔍 DEBUG Résultat scoring pour ${lead.nom_entreprise}`, {
+    score_final: score,
+    priorite,
+    reasons: reasons.join(' + ')
+  });
 
   return {
     score_global: Math.min(score, 100),
@@ -449,9 +468,12 @@ function buildAddressFromTags(tags) {
   return parts.join(', ');
 }
 
-function buildLeadFromOsmResult(tags, dept, crawlBatchId, sourceUrl) {
-  const nom_entreprise = tags.name || tags.operator || tags.brand || null;
-  if (!nom_entreprise) return null;
+function buildLeadFromOsmResult(element, dept, crawlBatchId, sourceUrl) {
+  const tags = element.tags || {};
+  const lat = element.lat || element.center?.lat || null;
+  const lng = element.lon || element.center?.lon || null;
+
+  const nom_entreprise = tags.name || tags.operator || tags.brand || `Élément OSM ${element.id}`;
   const telephone = formatPhoneForSheets(tags.phone || tags['contact:phone'] || null);
   const site_web = tags.website || tags['contact:website'] || null;
   const email = normalizeEmail(tags.email || tags['contact:email'] || null);
@@ -461,7 +483,7 @@ function buildLeadFromOsmResult(tags, dept, crawlBatchId, sourceUrl) {
   const adresse_complete = buildAddressFromTags(tags);
   const code_postal = tags['addr:postcode'] || null;
   const ville = tags['addr:city'] || tags['addr:place'] || null;
-  const source_url = `https://www.openstreetmap.org/${element.type}/${element.id}`;
+  const source_url = sourceUrl || (element.type && element.id ? `https://www.openstreetmap.org/${element.type}/${element.id}` : null);
   const phone_norm = normalizePhone(tags.phone || tags['contact:phone'] || '');
   const domain_norm = site_web ? normalizeDomain(site_web) : '';
   const name_city_norm = normalizeNameCity(nom_entreprise, adresse_complete);
@@ -571,35 +593,8 @@ async function scrapeDepartmentOSM(dept, crawlBatchId, searchKeywords) {
         try {
           const lead = buildLeadFromOsmResult(element, dept, crawlBatchId);
           if (!lead) continue;
-          
-          // Filtrage des faux positifs liés au mot-clé
-          if (searchKeywords && searchKeywords.length > 0) {
-            const nomLower = lead.nom_entreprise.toLowerCase();
-            const isRelevant = searchKeywords.some(kw => {
-              const kwLower = kw.toLowerCase();
-              // Vérifier que ce n'est pas un nom de rue/place
-              const isFakeLocation = /^(rue|place|avenue|boulevard|impasse|allée|chemin|passage|bus|ligne|arrêt)\b/i.test(lead.nom_entreprise);
-              if (isFakeLocation) return false;
-              
-              // Pour l'immobilier, on accepte aussi les noms d'agences connues même si le nom ne contient pas le mot-clé
-              const isRealEstateSearch = searchKeywords.some(kw => 
-                REAL_ESTATE_KEYWORDS.some(rk => kw.toLowerCase().includes(rk.toLowerCase()) || rk.toLowerCase().includes(kw.toLowerCase()))
-              );
-              
-              if (isRealEstateSearch) {
-                // Accepter si le nom contient le mot-clé OU si c'est une agence connue
-                const knownAgencies = /\b(century\s*21|orpi|foncia|laforet|guy\s*hoquet|era|remax|cfi\s*immobilier|stephane\s*plaza|l'adour|agence|immobilier|immobilière|real\s*estate|estate\s*agent)\b/i;
-                return nomLower.includes(kwLower) || knownAgencies.test(nomLower);
-              }
-              
-              return nomLower.includes(kwLower);
-            });
-            if (!isRelevant) {
-              logInfo(`⏭ Lead OSM ignoré (hors keyword): ${lead.nom_entreprise}`);
-              continue;
-            }
-          }
-          
+
+          // Plus de filtrage - traitement de tous les leads OSM
           leads.push(lead);
           logInfo(`✅ Lead OSM: ${lead.nom_entreprise}`, {
             telephone: lead.telephone ? '✓' : '✗',
@@ -905,7 +900,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
                 const match = paginationText.match(/(\d+)\s*pages?/i);
                 return match ? parseInt(match[1]) : null;
               }
-              
+
               // Alternative: chercher le dernier numéro de page dans la pagination
               const pageLinks = Array.from(document.querySelectorAll('a[href*="page="]'));
               const pageNumbers = pageLinks.map(link => {
@@ -915,7 +910,7 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
               }).filter(n => n > 0);
               return pageNumbers.length > 0 ? Math.max(...pageNumbers) : null;
             });
-            
+
             if (totalPages) {
               const displayMax = maxPagesPerDept === Infinity ? 'toutes' : maxPagesPerDept;
               logInfo(`${totalPages} pages détectées pour dept=${dept} (max configuré: ${displayMax})`);
@@ -1393,8 +1388,22 @@ async function processLead(lead, options = {}) {
     if (crawlBatchId && cancelledBatches.has(crawlBatchId)) throw new Error('CANCELLED');
   } catch (err) { logWarning(`Erreur enrichissement Google Maps: ${err.message}`); }
 
+  // Normaliser les champs mis à jour par Google Maps
+  if (lead.telephone) lead.phone_norm = normalizePhone(lead.telephone);
+  if (lead.site_web) lead.domain_norm = normalizeDomain(lead.site_web);
+
   // Étape 3 — Scoring
   lead = withUpdatedScore(lead);
+  
+  // Debug : vérifier que les données Google Maps sont bien présentes AVANT le scoring
+  logInfo(`🔍 DEBUG Scoring pour ${lead.nom_entreprise}`, {
+    telephone: lead.telephone || null,
+    site_web: lead.site_web || null,
+    adresse_complete: lead.adresse_complete || null,
+    score_calcule: lead.score_global,
+    scoring_reasons: lead.reason || null
+  });
+  
   logInfo(`📊 Score: ${lead.score_global} (${lead.priorite}) — ${lead.nom_entreprise}`);
 
   // Étape 4 — Vérification activité sur societe.com + récupération SIRET
