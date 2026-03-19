@@ -345,6 +345,23 @@
             color: #333;
         }
 
+        .btn-info {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 600;
+            margin-left: 10px;
+            transition: all 0.3s ease;
+        }
+        .btn-info:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(23, 162, 184, 0.3);
+        }
+
         .options-section {
             background: #f8f9fa;
             padding: 1.5rem;
@@ -833,6 +850,7 @@
                 <button type="submit" class="scrape-button" id="scrapeButton">
                     Commencer le scraping
                 </button>
+                
 
                 <button type="button" class="stop-button" id="stopButton" style="display: none;">
                     Arrêter le processus

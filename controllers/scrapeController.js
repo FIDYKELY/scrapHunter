@@ -1,34 +1,11 @@
 // controllers/scrapeController.js
 const legacyScraper = require('../services/legacyScraper');
 const hubspotService = require('../services/hubspotService');
+const scrapingStore = require('../services/scrapingStore');
 const { v4: uuidv4 } = require('uuid');
 
-// ── File d'attente globale (partagée sur toute l'application) ─────────
+// ── Statut global en mémoire (simple flag, pas critique) ─────────
 let globalScrapingActive = false;
-const scrapingQueue = []; // [{ queueId, params, status: 'waiting'|'ready' }]
-
-function enqueue(params) {
-  const queueId = require('uuid').v4();
-  scrapingQueue.push({ queueId, params, status: 'waiting', enqueuedAt: new Date() });
-  return { queueId, position: scrapingQueue.length };
-}
-
-function dequeueNext() {
-  // Marque le premier de la file comme "ready" (c'est son tour)
-  if (scrapingQueue.length > 0) {
-    scrapingQueue[0].status = 'ready';
-  }
-}
-
-function removeFromQueue(queueId) {
-  const idx = scrapingQueue.findIndex(q => q.queueId === queueId);
-  if (idx !== -1) scrapingQueue.splice(idx, 1);
-}
-
-function getQueuePosition(queueId) {
-  const idx = scrapingQueue.findIndex(q => q.queueId === queueId);
-  return idx; // -1 = pas trouvé, 0 = premier (ready), 1+ = en attente
-}
 
 class ScrapeController {
 
@@ -62,7 +39,7 @@ class ScrapeController {
       // Retour d'un client en file d'attente : vérifier double condition
       // 1. Il doit être en position 0 (premier de la file)
       // 2. Le scraping actif doit être libéré (globalScrapingActive === false)
-      const pos = getQueuePosition(queueId);
+      const pos = await scrapingStore.getQueuePosition(queueId);
       if (pos === -1) {
         // queueId inconnu (expiré ou annulé) : refuser
         return res.status(409).json({ error: 'queueId inconnu ou expiré' });
@@ -72,11 +49,14 @@ class ScrapeController {
         return res.json({ queued: true, position: pos + 1, queueId });
       }
       // C'est son tour ET le serveur est libre : retirer de la queue et continuer
-      removeFromQueue(queueId);
+      await scrapingStore.removeFromQueue(queueId);
     } else if (globalScrapingActive) {
       // Nouvelle demande alors qu'un scraping est actif : mettre en file
-      const queued = enqueue({ keyword, source, enableEnrichment, enableN8nSending,
-        oneByOneProcessing, departments, sheetId, destGoogleSheets, destHubSpot });
+      const userEmail = req.session.userEmail;
+      const queued = await scrapingStore.enqueue(
+        { keyword, source, enableEnrichment, enableN8nSending, oneByOneProcessing, departments, sheetId, destGoogleSheets, destHubSpot },
+        userEmail
+      );
       console.log(`📋 Scraping en file d'attente — position ${queued.position} (queueId: ${queued.queueId})`);
       return res.json({ queued: true, position: queued.position, queueId: queued.queueId });
     }
@@ -85,40 +65,23 @@ class ScrapeController {
     globalScrapingActive = true;
 
     const batchId = uuidv4();
+    const userEmail = req.session.userEmail;
+    const startTime = new Date();
     
-    // Initialiser la map des statuts si nécessaire
-    req.session.scrapingStatuses = req.session.scrapingStatuses || {};
-    
-    // Créer le statut initial pour ce batch
-    req.session.scrapingStatuses[batchId] = {
-      isRunning: true,
+    // Créer le batch en base de données
+    await scrapingStore.createBatch(batchId, {
       keyword,
-      source: sources,
+      sources,
       departments,
-      startTime: new Date(),
-      leadsCount: 0,
+      startTime,
       enrichmentEnabled: enableEnrichment,
       n8nEnabled: enableN8nSending && destGoogleSheets,
       oneByOneProcessing,
       destGoogleSheets,
       destHubSpot,
       crawlBatchId: batchId,
-      error: null,
-      completed: false,
-      cancelled: false,
-      stats: null,
-      spreadsheetUrl: null
-    };
-
-    console.log(`🚀 Starting scraping: keyword="${keyword}", sources="${sources.join(',')}", batchId="${batchId}"`);
-    console.log(`📤 Destinations: Google Sheets=${destGoogleSheets}, HubSpot=${destHubSpot}`);
-
-    // Sauvegarder la session avant de lancer le processus en arrière-plan
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) return reject(err);
-        resolve();
-      });
+      sheetId,
+      userEmail
     });
 
     // ── LANCER LE SCRAPING EN ARRIÈRE-PLAN ────────────────────────────
@@ -133,49 +96,42 @@ class ScrapeController {
         });
 
         const leads = results.leads || [];
-        const status = req.session.scrapingStatuses[batchId];
         
-        if (status) {
-          status.isRunning = false;
-          status.completed = true;
-          status.leadsCount = results.successful;
-          status.cancelled = !!results.cancelled;
-          
-          if (results.cancelled) {
-            status.error = 'Scraping arrêté par l\'utilisateur';
-          }
-
-          // Calculer les stats
-          status.stats = this.calculateStats(leads);
-          
-          // URL du spreadsheet si disponible
-          if (sheetId) {
-            status.spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
-          }
+        // Mettre à jour le batch en base
+        const updates = {
+          is_running: false,
+          completed: true,
+          leads_count: results.successful,
+          cancelled: !!results.cancelled,
+          stats: this.calculateStats(leads)
+        };
+        
+        if (results.cancelled) {
+          updates.error = 'Scraping arrêté par l\'utilisateur';
         }
 
-        // Sauvegarder la session
-        await new Promise((resolve) => req.session.save(resolve));
+        if (sheetId) {
+          updates.spreadsheet_url = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+        }
+
+        await scrapingStore.updateBatch(batchId, updates);
         
         console.log(`✅ Batch ${batchId} terminé: ${results.successful} leads traités`);
 
       } catch (error) {
         console.error(`❌ Batch ${batchId} erreur:`, error.message);
         
-        const status = req.session.scrapingStatuses[batchId];
-        if (status) {
-          status.isRunning = false;
-          status.completed = true;
-          status.error = error.message;
-          status.cancelled = false;
-        }
-        
-        await new Promise((resolve) => req.session.save(resolve));
+        await scrapingStore.updateBatch(batchId, {
+          is_running: false,
+          completed: true,
+          error: error.message,
+          cancelled: false
+        });
       } finally {
         globalScrapingActive = false;
-        dequeueNext();
-        if (scrapingQueue.length > 0) {
-          console.log(`📋 Queue: ${scrapingQueue.length} scraping(s) en attente — prochain: ${scrapingQueue[0].queueId}`);
+        const nextQueueId = await scrapingStore.dequeueNext();
+        if (nextQueueId) {
+          console.log(`📋 Prochain scraping prêt: ${nextQueueId}`);
         }
       }
     })();
@@ -229,63 +185,73 @@ class ScrapeController {
       return res.status(400).json({ error: 'batchId manquant' });
     }
 
-    const statuses = req.session.scrapingStatuses || {};
-    const status = statuses[batchId];
+    try {
+      const status = await scrapingStore.getBatch(batchId);
 
-    if (!status) {
-      return res.status(404).json({ error: 'Batch non trouvé' });
+      if (!status) {
+        return res.status(404).json({ error: 'Batch non trouvé' });
+      }
+
+      // Réponse légère avec seulement les infos utiles
+      res.json({
+        batchId: status.batchId,
+        isRunning: status.isRunning,
+        completed: status.completed,
+        cancelled: status.cancelled,
+        error: status.error,
+        leadsCount: status.leadsCount,
+        stats: status.stats || null,
+        startTime: status.startTime,
+        spreadsheetUrl: status.spreadsheetUrl || null,
+        keyword: status.keyword,
+        source: status.sources
+      });
+    } catch (error) {
+      console.error('❌ Erreur getBatchStatus:', error.message);
+      res.status(500).json({ error: 'Erreur serveur' });
     }
-
-    // Réponse légère avec seulement les infos utiles
-    res.json({
-      batchId,
-      isRunning: status.isRunning,
-      completed: status.completed,
-      cancelled: status.cancelled,
-      error: status.error,
-      leadsCount: status.leadsCount,
-      stats: status.stats || null,
-      startTime: status.startTime,
-      spreadsheetUrl: status.spreadsheetUrl || null,
-      keyword: status.keyword,
-      source: status.source
-    });
   }
 
   // ── MÉTHODE LEGACY: Pour compatibilité avec l'ancien frontend ────
   async getScrapingStatus(req, res) {
-    // Chercher le dernier batch actif ou le plus récent
-    const statuses = req.session.scrapingStatuses || {};
-    
-    // Chercher un batch en cours
-    let activeBatch = Object.values(statuses).find(s => s.isRunning);
-    
-    // Sinon prendre le plus récent complété
-    if (!activeBatch) {
-      const sorted = Object.values(statuses).sort((a, b) => 
-        new Date(b.startTime) - new Date(a.startTime)
-      );
-      activeBatch = sorted[0];
+    try {
+      const userEmail = req.session.userEmail;
+      
+      // Chercher le dernier batch actif ou le plus récent
+      const batches = await scrapingStore.getAllBatches(userEmail);
+      
+      // Chercher un batch en cours
+      let activeBatch = batches.find(b => b.isRunning);
+      
+      // Sinon prendre le plus récent complété
+      if (!activeBatch && batches.length > 0) {
+        activeBatch = batches[0];
+      }
+
+      // Fallback sur l'ancien format pour compatibilité
+      const status = activeBatch || req.session.scrapingStatus || {
+        isRunning: false,
+        leadsCount: 0,
+        spreadsheetUrl: null
+      };
+
+      res.json(status);
+    } catch (error) {
+      console.error('❌ Erreur getScrapingStatus:', error.message);
+      // Fallback sur l'ancien comportement
+      res.json(req.session.scrapingStatus || { isRunning: false, leadsCount: 0, spreadsheetUrl: null });
     }
-
-    // Fallback sur l'ancien format pour compatibilité
-    const status = activeBatch || req.session.scrapingStatus || {
-      isRunning: false,
-      leadsCount: 0,
-      spreadsheetUrl: null
-    };
-
-    res.json(status);
   }
 
-  resetScrapingStatus(req, res) {
-    req.session.scrapingStatuses = {};
+  async resetScrapingStatus(req, res) {
+    // Note: On ne peut pas vraiment "réinitialiser" la base, mais on peut
+    // arrêter tous les batches en cours pour cet utilisateur
     req.session.scrapingStatus = { isRunning: false, leadsCount: 0, spreadsheetUrl: null };
     res.json({ success: true, message: 'All scraping statuses reset' });
   }
 
   // ── MODIFIÉ: Stop scraping avec batchId ──────────────────────────
-  stopScraping(req, res) {
+  async stopScraping(req, res) {
     const { batchId } = req.body;
 
     if (!batchId) {
@@ -306,28 +272,30 @@ class ScrapeController {
       return res.status(400).json({ error: 'batchId manquant' });
     }
 
-    const statuses = req.session.scrapingStatuses || {};
-    const status = statuses[batchId];
+    try {
+      const status = await scrapingStore.getBatch(batchId);
 
-    if (!status || !status.crawlBatchId) {
-      return res.status(404).json({ error: 'Batch non trouvé ou déjà terminé' });
+      if (!status || !status.crawlBatchId) {
+        return res.status(404).json({ error: 'Batch non trouvé ou déjà terminé' });
+      }
+
+      console.log(`🛑 Stopping scrape batch: ${batchId}`);
+      if (typeof legacyScraper.cancelScrape === 'function') {
+        legacyScraper.cancelScrape(status.crawlBatchId);
+      }
+
+      // Mettre à jour le statut en base
+      await scrapingStore.updateBatch(batchId, {
+        isRunning: false,
+        cancelled: true,
+        error: 'Scraping arrêté par l\'utilisateur'
+      });
+
+      res.json({ success: true, message: 'Stop signal sent' });
+    } catch (error) {
+      console.error('❌ Erreur stopScraping:', error.message);
+      res.status(500).json({ error: 'Erreur serveur' });
     }
-
-    console.log(`🛑 Stopping scrape batch: ${batchId}`);
-    if (typeof legacyScraper.cancelScrape === 'function') {
-      legacyScraper.cancelScrape(status.crawlBatchId);
-    }
-
-    // Mettre à jour le statut
-    status.isRunning = false;
-    status.cancelled = true;
-    status.error = 'Scraping arrêté par l\'utilisateur';
-
-    req.session.save((err) => {
-      if (err) console.error('Erreur sauvegarde session:', err);
-    });
-
-    res.json({ success: true, message: 'Stop signal sent' });
   }
 
   // Nouvelle méthode pour tester uniquement l'envoi n8n
@@ -373,27 +341,77 @@ class ScrapeController {
     const { queueId } = req.query;
     if (!queueId) return res.status(400).json({ error: 'Missing queueId' });
 
-    const pos = getQueuePosition(queueId);
-    if (pos === -1) {
-      return res.json({ status: 'not_found' });
-    }
-    const qItem = scrapingQueue.find(q => q.queueId === queueId);
-    
-    // Si c'est notre tour et que personne d'autre ne tourne
-    if (qItem.status === 'ready' && !globalScrapingActive) {
-      return res.json({ status: 'ready' });
-    }
+    try {
+      const pos = await scrapingStore.getQueuePosition(queueId);
+      if (pos === -1) {
+        return res.json({ status: 'not_found' });
+      }
+      
+      const qItem = await scrapingStore.getQueueItem(queueId);
+      
+      // Si c'est notre tour et que personne d'autre ne tourne
+      if (qItem && qItem.status === 'ready' && !globalScrapingActive) {
+        return res.json({ status: 'ready' });
+      }
 
-    return res.json({ status: 'waiting', position: pos + 1 });
-  } // <-- AJOUT DE L'ACCOLADE MANQUANTE ICI
+      return res.json({ status: 'waiting', position: pos + 1 });
+    } catch (error) {
+      console.error('❌ Erreur getQueueStatus:', error.message);
+      res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
 
   async removeQueue(req, res) {
     const { queueId } = req.body;
     if (!queueId) return res.status(400).json({ error: 'Missing queueId' });
     
-    removeFromQueue(queueId);
-    console.log(`📋 Annulation file d'attente pour queueId: ${queueId}`);
-    res.json({ success: true });
+    try {
+      await scrapingStore.removeFromQueue(queueId);
+      console.log(`📋 Annulation file d'attente pour queueId: ${queueId}`);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('❌ Erreur removeQueue:', error.message);
+      res.status(500).json({ error: 'Erreur serveur' });
+    }
+  }
+
+  // ── MÉTHODE DE MONITORING ─────────────────────────────────────────
+  async getMonitoringData(req, res) {
+    try {
+      const userEmail = req.session.userEmail;
+      const userRole = req.session.userRole;
+      
+      // Récupérer les batches : tous pour admin, seulement ceux de l'utilisateur pour user
+      const batches = (userRole === 'admin')
+        ? await scrapingStore.getAllBatches()
+        : await scrapingStore.getAllBatches(userEmail);
+      
+      // Informations sur la file d'attente (admin voit tout, user voit seulement ses entrées)
+      let queue = await scrapingStore.listQueue();
+      if (userRole !== 'admin') {
+        queue = queue.filter(item => item.userEmail === userEmail);
+      }
+      
+      const formattedQueue = queue.map(item => ({
+        queueId: item.queueId,
+        status: item.status,
+        enqueuedAt: item.enqueuedAt,
+        keyword: item.params?.keyword,
+        source: item.params?.source,
+        departments: item.params?.departments
+      }));
+
+      res.json({
+        success: true,
+        globalScrapingActive,
+        queue: formattedQueue,
+        batches,
+        userRole
+      });
+    } catch (error) {
+      console.error('❌ Erreur getMonitoringData:', error.message);
+      res.status(500).json({ success: false, error: 'Erreur serveur' });
+    }
   }
 }
 

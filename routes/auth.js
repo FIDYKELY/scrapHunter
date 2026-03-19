@@ -17,26 +17,37 @@ router.get('/login', (req, res) => {
 router.post('/login', (req, res) => {
   const { email, password } = req.body;
   
+  
   const authorizedUsers = [
     {
       email: process.env.ADMIN_EMAIL || 'admin@example.com',
-      password: process.env.ADMIN_PASSWORD || 'admin123'
+      username: process.env.ADMIN_USERNAME || 'admin',
+      password: process.env.ADMIN_PASSWORD || 'admin123',
+      role: 'admin'
     },
     {
-      email: process.env.ADMIN_EMAIL_2 || 'user2@example.com',
-      password: process.env.ADMIN_PASSWORD_2 || 'user2123'
+      email: process.env.USER_EMAIL_2 || 'joel@example.com',
+      username: process.env.USER_USERNAME_2 || 'joel',
+      password: process.env.USER_PASSWORD_2 || 'joel2123',
+      role: 'user'
     }
   ];
   
-  // Vérifier si l'utilisateur existe dans la liste
-  const user = authorizedUsers.find(u => u.email === email && u.password === password);
+  
+  // Vérifier si l'utilisateur existe (par email OU par username)
+  const user = authorizedUsers.find(u => 
+    (u.email === email || u.username === email) && u.password === password
+  );
+  
+  console.log('✅ User found:', user ? 'YES' : 'NO');
   
   if (user) {
     req.session.isAuthenticated = true;
-    req.session.userEmail = email;
+    req.session.userEmail = user.email;
+    req.session.userRole = user.role;
     res.redirect('/scrape');
   } else {
-    req.session.error = 'Invalid email or password';
+    req.session.error = 'Invalid email, username or password';
     res.redirect('/login');
   }
 });

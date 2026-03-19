@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Monitoring - Scraping</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    h1, h2 { color: #333; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 14px; }
+    th, td { border: 1px solid #ddd; padding: 10px; text-align: left; vertical-align: middle; }
+    th { background-color: #f2f2f2; font-weight: bold; }
+    .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; }
+    .badge.running { background-color: #28a745; }
+    .badge.waiting { background-color: #ffc107; color: #333; }
+    .badge.completed { background-color: #17a2b8; }
+    .badge.cancelled { background-color: #dc3545; }
+    .badge.ready { background-color: #6c757d; }
+    .badge.not_found { background-color: #6c757d; }
+    button { padding: 5px 10px; margin: 2px; cursor: pointer; border: none; border-radius: 4px; background: #007bff; color: white; }
+    button:hover { background: #0056b3; }
+    button.danger { background: #dc3545; }
+    button.danger:hover { background: #bd2130; }
+    .global-state { font-size: 18px; margin-bottom: 20px; padding: 10px; background: #e9ecef; border-radius: 4px; }
+    .btn-back { display: inline-block; padding: 8px 16px; background: #667eea; color: white; text-decoration: none; border-radius: 5px; font-size: 14px; transition: background 0.3s ease; }
+    .btn-back:hover { background: #5a6fd8; }
+    .success { color: #28a745; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h1>Monitoring des scrapings</h1>
+      <a href="/scrape" class="btn-back">← Retour au scraping</a>
+    </div>
+    <div class="global-state" id="global-state">
+      État global : <span id="global-active">Inactif</span>
+    </div>
+
+    <h2>📋 File d'attente (<span id="queue-count">0</span>)</h2>
+    <table id="queue-table">
+      <thead>
+        <tr>
+          <th>Queue ID</th>
+          <th>Utilisateur</th>
+          <th>Keyword</th>
+          <th>Source</th>
+          <th>Départements</th>
+          <th>Statut</th>
+          <th>En attente depuis</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody id="queue-body"></tbody>
+    </table>
+
+    <h2>🔄 Batches récents</h2>
+    <table id="batches-table">
+      <thead>
+        <tr>
+          <th>Batch ID</th>
+          <th>Utilisateur</th>
+          <th>Keyword</th>
+          <th>Source</th>
+          <th>Démarré</th>
+          <th>Statut</th>
+          <th>Leads</th>
+          <th>Priorités (A/B/C/D)</th>
+          <th>Erreur</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="batches-body"></tbody>
+    </table>
+  </div>
+
+  <script>
+    async function fetchMonitoring() {
+      try {
+        const res = await fetch('/scrape/monitoring');
+        const data = await res.json();
+        if (data.success) {
+          updateUI(data);
+        } else {
+          console.error('Erreur API monitoring');
+        }
+      } catch (err) {
+        console.error('Erreur réseau:', err);
+      }
+    }
+
+    function updateUI(data) {
+      // État global
+      document.getElementById('global-active').innerText = data.globalScrapingActive ? 'Actif (un scraping en cours)' : 'Inactif';
+      document.getElementById('global-active').className = data.globalScrapingActive ? 'success' : '';
+
+      // File d'attente
+      document.getElementById('queue-count').innerText = data.queue.length;
+      const queueBody = document.getElementById('queue-body');
+      queueBody.innerHTML = '';
+      data.queue.forEach(item => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${item.queueId.substring(0,8)}...</td>
+          <td>${item.userEmail || '-'}</td>
+          <td>${item.keyword || '-'}</td>
+          <td>${item.source ? (Array.isArray(item.source) ? item.source.join(', ') : item.source) : '-'}</td>
+          <td>${item.departments ? (Array.isArray(item.departments) ? item.departments.join(', ') : item.departments) : '-'}</td>
+          <td><span class="badge ${item.status}">${item.status}</span></td>
+          <td>${item.enqueuedAt ? new Date(item.enqueuedAt).toLocaleString() : '-'}</td>
+          <td>
+            <button class="danger" onclick="cancelQueue('${item.queueId}')">Annuler</button>
+          </td>
+        `;
+        queueBody.appendChild(row);
+      });
+
+      // Batches
+      const batchesBody = document.getElementById('batches-body');
+      batchesBody.innerHTML = '';
+      data.batches.forEach(batch => {
+        const row = document.createElement('tr');
+        let statusClass = '';
+        let statusText = '';
+        if (batch.isRunning) { statusClass = 'running'; statusText = 'En cours'; }
+        else if (batch.cancelled) { statusClass = 'cancelled'; statusText = 'Annulé'; }
+        else if (batch.completed) { statusClass = 'completed'; statusText = 'Terminé'; }
+        else { statusClass = 'waiting'; statusText = 'En attente'; }
+
+        const priorities = batch.stats ? 
+          `A:${batch.stats.priorityA} B:${batch.stats.priorityB} C:${batch.stats.priorityC} D:${batch.stats.priorityD}` : '-';
+
+        row.innerHTML = `
+          <td>${batch.batchId.substring(0,8)}...</td>
+          <td>${batch.userEmail || '-'}</td>
+          <td>${batch.keyword}</td>
+          <td>${batch.sources ? (Array.isArray(batch.sources) ? batch.sources.join(', ') : batch.sources) : '-'}</td>
+          <td>${new Date(batch.startTime).toLocaleString()}</td>
+          <td><span class="badge ${statusClass}">${statusText}</span></td>
+          <td>${batch.leadsCount || 0}</td>
+          <td>${priorities}</td>
+          <td class="error">${batch.error || '-'}</td>
+          <td>
+            ${batch.isRunning ? `<button class="danger" onclick="stopBatch('${batch.batchId}')">Arrêter</button>` : ''}
+            <button onclick="viewBatch('${batch.batchId}')">Détails</button>
+          </td>
+        `;
+        batchesBody.appendChild(row);
+      });
+    }
+
+    async function cancelQueue(queueId) {
+      if (!confirm('Annuler cette entrée dans la file d\'attente ?')) return;
+      try {
+        const res = await fetch('/scrape/queue-cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ queueId })
+        });
+        const data = await res.json();
+        if (data.success) {
+          fetchMonitoring();
+        } else {
+          alert('Erreur: ' + data.error);
+        }
+      } catch (err) {
+        alert('Erreur réseau');
+      }
+    }
+
+    async function stopBatch(batchId) {
+      if (!confirm('Arrêter ce scraping ?')) return;
+      try {
+        const res = await fetch('/scrape/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ batchId })
+        });
+        const data = await res.json();
+        if (data.success) {
+          fetchMonitoring();
+        } else {
+          alert('Erreur: ' + data.error);
+        }
+      } catch (err) {
+        alert('Erreur réseau');
+      }
+    }
+
+    function viewBatch(batchId) {
+      // Rediriger vers une page de détail (à créer ultérieurement)
+      alert('Fonctionnalité à venir : page de détail du batch ' + batchId);
+    }
+
+    // Mise à jour toutes les 5 secondes
+    setInterval(fetchMonitoring, 5000);
+    fetchMonitoring();
+  </script>
+</body>
+</html>

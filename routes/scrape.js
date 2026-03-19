@@ -12,6 +12,17 @@ function isAuthenticated(req, res, next) {
   res.redirect('/login');
 }
 
+// Middleware to check if user is admin
+function isAdmin(req, res, next) {
+  if (req.session.isAuthenticated && req.session.userRole === 'admin') {
+    return next();
+  }
+  res.status(403).render('error', { 
+    error: 'Accès interdit. Vous devez être administrateur.',
+    user: { email: req.session.userEmail }
+  });
+}
+
 // Middleware to check authentication for API endpoints
 function isAuthenticatedAPI(req, res, next) {
   if (req.session.isAuthenticated) {
@@ -107,6 +118,16 @@ router.get('/queue-status', isAuthenticatedAPI, (req, res) => {
 // Annuler une file d'attente
 router.post('/queue-cancel', isAuthenticatedAPI, (req, res) => {
   scrapeController.removeQueue(req, res);
+});
+
+// API de monitoring (données JSON) - réservée aux admins
+router.get('/monitoring', isAuthenticatedAPI, isAdmin, (req, res) => {
+  scrapeController.getMonitoringData(req, res);
+});
+
+// Page de monitoring (vue EJS) - réservée aux admins
+router.get('/monitoring-view', isAuthenticated, isAdmin, (req, res) => {
+  res.render('monitoring', { user: { email: req.session.userEmail, role: req.session.userRole } });
 });
 
 module.exports = router;
