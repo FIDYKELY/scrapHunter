@@ -19,19 +19,56 @@ const cancelledBatches = new Set();
 /**
  * Attente capable d'être interrompue
  * Retourne true si annulé, false sinon
+ * Lance une erreur explicite 'CANCELLED' si throwOnCancel est true
  */
-async function cancellableSleep(ms, crawlBatchId) {
+async function cancellableSleep(ms, crawlBatchId, throwOnCancel = false) {
   if (!crawlBatchId) {
     await new Promise(r => setTimeout(r, ms));
     return false;
   }
   const start = Date.now();
   while (Date.now() - start < ms) {
-    if (cancelledBatches.has(crawlBatchId)) return true;
+    if (cancelledBatches.has(crawlBatchId)) {
+      if (throwOnCancel) {
+        throw new Error('CANCELLED');
+      }
+      return true;
+    }
     const remaining = ms - (Date.now() - start);
-    await new Promise(r => setTimeout(r, Math.min(1000, remaining)));
+    await new Promise(r => setTimeout(r, Math.min(500, remaining)));
   }
-  return cancelledBatches.has(crawlBatchId);
+  const wasCancelled = cancelledBatches.has(crawlBatchId);
+  if (wasCancelled && throwOnCancel) {
+    throw new Error('CANCELLED');
+  }
+  return wasCancelled;
+}
+
+/**
+ * Wrapper pour exécuter une promesse avec possibilité d'annulation
+ * Annule et lève une erreur 'CANCELLED' si le batch est annulé
+ */
+async function withCancellation(promise, crawlBatchId, cleanupFn = null) {
+  if (!crawlBatchId) return promise;
+  
+  const checkInterval = setInterval(() => {
+    if (cancelledBatches.has(crawlBatchId)) {
+      clearInterval(checkInterval);
+      if (cleanupFn) cleanupFn();
+    }
+  }, 500);
+  
+  try {
+    const result = await promise;
+    clearInterval(checkInterval);
+    if (cancelledBatches.has(crawlBatchId)) {
+      throw new Error('CANCELLED');
+    }
+    return result;
+  } catch (error) {
+    clearInterval(checkInterval);
+    throw error;
+  }
 }
 
 // ─────────────────────────────────────────────
@@ -90,10 +127,15 @@ function getDomainLimiter(domain) {
 // CONSTANTES OSM / PAGESJAUNES
 // ─────────────────────────────────────────────
 const OVERPASS_SERVERS = [
-  'https://overpass-api.de/api/interpreter',
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.nchc.org.tw/api/interpreter'
+  'https://overpass-api.de/api/interpreter',               // Allemagne (principal)
+  'https://overpass.kumi.systems/api/interpreter',          // Canada (backup)
+  'https://overpass.metrostationsystem.de/api/interpreter', // Allemagne (stable)
+  'https://overpass.openstreetmap.ie/api/interpreter',      // Irlande
+  'https://overpass.mirko.dev/api/interpreter'              // Allemagne (bon débit)
 ];
+
+// Stocke les échecs par serveur (marquage temporaire des serveurs défaillants)
+const SERVER_FAILURES = new Map();
 
 const OSM_TAGS = [
   'office=real_estate',
@@ -408,12 +450,20 @@ function splitDepartmentBbox(bbox, maxSplits = 4) {
   return bboxes;
 }
 
-async function executeOverpassQuery(query, serverIndex = 0) {
+async function executeOverpassQuery(query, serverIndex = 0, attempt = 0) {
   const server = OVERPASS_SERVERS[serverIndex];
+  
+  // Si le serveur a échoué trop récemment, on le saute
+  const lastFail = SERVER_FAILURES.get(server);
+  if (lastFail && Date.now() - lastFail < 300000) { // 5 minutes
+    logWarning(`Serveur ${server} marqué comme défaillant récemment, passage au suivant`);
+    return executeOverpassQuery(query, serverIndex + 1, 0);
+  }
+
   await OSM_RATE_LIMITER.acquire('overpass-api');
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000);
+  const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
 
   try {
     const response = await fetch(server, {
@@ -424,36 +474,69 @@ async function executeOverpassQuery(query, serverIndex = 0) {
     });
     clearTimeout(timeoutId);
 
-    // Vérifier le Content-Type avant de parser en JSON
-    // Certains serveurs renvoient du XML ou HTML en cas d'erreur même avec status 200
+    // Vérifier le Content-Type
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('xml') || contentType.includes('html')) {
       const bodyText = await response.text();
-      throw new Error(`Overpass returned non-JSON response (${contentType.split(';')[0].trim()}): ${bodyText.substring(0, 100)}`);
+      throw new Error(`Non-JSON response (${contentType}): ${bodyText.substring(0, 100)}`);
     }
 
-    if (!response.ok) throw new Error(`Overpass API error: ${response.status} ${response.statusText}`);
+    if (!response.ok) {
+      // Gestion spécifique des codes d'erreur
+      if (response.status === 429 || response.status === 503) {
+        const retryAfter = response.headers.get('Retry-After');
+        const wait = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
+        logWarning(`Rate limit ou surcharge (${response.status}) sur ${server}, attente ${wait}ms`);
+        await new Promise(r => setTimeout(r, wait));
+        // Réessayer le même serveur
+        return executeOverpassQuery(query, serverIndex, attempt + 1);
+      }
+      if (response.status === 403) {
+        // Interdit → probablement définitif, on passe au suivant
+        SERVER_FAILURES.set(server, Date.now());
+        throw new Error(`Forbidden (403) on ${server}`);
+      }
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+
     const data = await response.json();
-    if (data.remark && data.remark.includes('runtime error')) throw new Error('Query too large, need to split');
+    if (data.remark && data.remark.includes('runtime error')) {
+      throw new Error('Query too large, need to split');
+    }
     return data;
+
   } catch (error) {
     clearTimeout(timeoutId);
-    // Tentative sur le serveur suivant pour: timeout, erreurs réseau, erreurs HTTP, XML/HTML retourné
-    const shouldFallback = serverIndex < OVERPASS_SERVERS.length - 1 && (
+
+    // Log de l'erreur
+    logWarning(`Erreur sur ${server}: ${error.message.substring(0, 80)}`);
+
+    // Décider si on peut basculer sur un autre serveur
+    const canFallback = serverIndex < OVERPASS_SERVERS.length - 1 && (
       error.name === 'AbortError' ||
-      error.message.includes('504') ||
-      error.message.includes('429') ||
-      error.message.includes('503') ||
+      error.code === 'ENOTFOUND' ||
+      error.code === 'ECONNREFUSED' ||
       error.message.includes('timeout') ||
-      error.message.includes('non-JSON') ||
-      error.message.includes('xml') ||
-      error.message.includes('Overpass API error') ||
-      error.message.includes('failed')
+      error.message.includes('Non-JSON') ||
+      error.message.includes('HTTP 4') || // 403, 429, etc.
+      error.message.includes('HTTP 5')
     );
-    if (shouldFallback) {
-      logWarning(`Changement serveur Overpass: ${server} -> ${OVERPASS_SERVERS[serverIndex + 1]} (raison: ${error.message.substring(0, 80)})`);
-      return executeOverpassQuery(query, serverIndex + 1);
+
+    if (canFallback) {
+      // Marquer le serveur comme défaillant pour éviter de le réutiliser trop vite
+      SERVER_FAILURES.set(server, Date.now());
+      logWarning(`Bascule vers ${OVERPASS_SERVERS[serverIndex + 1]}`);
+      return executeOverpassQuery(query, serverIndex + 1, 0);
+    } else if (attempt < 2) {
+      // Réessai avec backoff exponentiel sur le même serveur
+      const delay = 5000 * Math.pow(2, attempt);
+      logWarning(`Nouvel essai sur ${server} (${attempt+1}/3) dans ${delay}ms`);
+      await new Promise(r => setTimeout(r, delay));
+      return executeOverpassQuery(query, serverIndex, attempt + 1);
     }
+
+    // Échec définitif
+    logError(`Échec définitif pour la requête après ${attempt+1} tentatives`);
     throw error;
   }
 }
@@ -544,9 +627,10 @@ async function scrapeDepartmentOSM(dept, crawlBatchId, searchKeywords) {
       const bbox = getDepartmentBbox(dept);
       let bboxes = [bbox];
 
-      if (['13', '69', '59', '75', '92', '93', '94'].includes(dept)) {
-        bboxes = splitDepartmentBbox(bbox, 4);
-        logInfo(`Département ${dept} divisé en ${bboxes.length} zones`);
+      if (['13', '69', '59', '75', '92', '93', '94', '33', '31', '06'].includes(dept)) {
+        const splits = ['13', '75', '92', '93', '94'].includes(dept) ? 6 : 4;
+        bboxes = splitDepartmentBbox(bbox, splits);
+        logInfo(`Département ${dept} (dense) divisé en ${bboxes.length} zones`);
       }
 
       let totalElements = [];
@@ -984,6 +1068,9 @@ function mergeEnrichmentData(target, source) {
   if (source.emails?.length) target.emails.push(...source.emails);
   if (source.contactPage && !target.contactPage) target.contactPage = source.contactPage;
   if (source.contactForm) target.contactForm = true;
+  if (source.phone && !target.phone) target.phone = source.phone;
+  if (source.postalCode && !target.postalCode) target.postalCode = source.postalCode;
+  if (source.city && !target.city) target.city = source.city;
   Object.keys(source.social || {}).forEach(k => {
     if (source.social[k] && !target.social[k]) target.social[k] = source.social[k];
   });
@@ -1005,16 +1092,57 @@ async function scrapePageForContacts(url) {
       if (err.message && err.message.includes('net::ERR_')) {
         logWarning(`Erreur réseau pour ${url}: ${err.message}`);
         await browser.close();
-        return { emails: [], contactPage: null, contactForm: false, social: {} };
+        return { emails: [], contactPage: null, contactForm: false, social: {}, phone: null, postalCode: null, city: null };
       }
       throw err;
     }
 
     await new Promise(r => setTimeout(r, 1500));
 
-    const result = await page.evaluate(() => {
-      const r = { emails: [], contactPage: null, contactForm: false, social: {} };
+    // --- Tenter de cliquer sur les boutons de révélation de téléphone ---
+    try {
+      const phoneButtonSelectors = [
+        '.display-phone-number',
+        '[class*="phone"]',
+        'a[href*="tel"]:not([href^="tel:"])',
+        'button[class*="phone"]',
+        'a:has-text("Afficher")',
+        'button:has-text("Afficher")',
+        'a:has-text("Voir")',
+        'button:has-text("Voir")',
+        'a:has-text("téléphone")',      // ← ajout
+        'button:has-text("téléphone")',   // ← ajout
+        'a:has-text("numero")',
+        'button:has-text("numero")'
+      ];
+      for (const selector of phoneButtonSelectors) {
+        const button = await page.$(selector);
+        if (button) {
+          const text = await page.evaluate(el => el.textContent, button);
+          if (text && (text.toLowerCase().includes('afficher') || text.toLowerCase().includes('voir') || text.toLowerCase().includes('numero') || text.toLowerCase().includes('téléphone'))) {
+            await button.click({ delay: 100 });
+            logInfo(`📞 Bouton de téléphone cliqué sur ${url}`);
+            await new Promise(r => setTimeout(r, 2000)); // Attendre l'affichage
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      logWarning(`Erreur lors du clic sur bouton téléphone: ${err.message}`);
+    }
 
+    const result = await page.evaluate(() => {
+      const r = {
+        emails: [],
+        contactPage: null,
+        contactForm: false,
+        social: {},
+        phone: null,
+        postalCode: null,
+        city: null
+      };
+
+      // --- Emails ---
       const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
       const allMatches = [
         ...(document.body.textContent.match(emailRegex) || []),
@@ -1022,7 +1150,48 @@ async function scrapePageForContacts(url) {
       ];
       r.emails = [...new Set(allMatches.map(e => e.toLowerCase().trim()))];
 
-      // Réseaux sociaux
+      // Filtrer les emails invalides (URLs d'images, fichiers, etc.)
+      const validEmailRegex = /^[^\s@]+@[^\s@]+\.[a-zA-Z]{2,}$/;
+      const invalidExtensions = ['.webp', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.pdf', '.css', '.js', '.woff', '.ttf', '.eot', '.woff2', '.xml', '.json', '.zip', '.tar', '.gz', '.rar', '.exe', '.dmg', '.pkg', '.deb', '.rpm', '.apk', '.ipa', '.msi', '.dll', '.so', '.dylib', '.bin', '.dat', '.log', '.bak', '.tmp', '.swp', '.swo', '.swn', '.pyc', '.pyo', '.class', '.jar', '.war', '.ear', '.o', '.obj', '.lib', '.a', '.la', '.lo', '.Plo', '.Po', '.mo', '.gmo', '.cat', '.qm', '.msg', '.h', '.hpp', '.c', '.cpp', '.cc', '.cxx', '.C', '.java', '.scala', '.kt', '.swift', '.m', '.mm', '.go', '.rs', '.rb', '.py', '.pl', '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd', '.vbs', '.vbe', '.jsb', '.jse', '.wsf', '.wsh', '.hta', '.html', '.htm', '.shtml', '.xhtml', '.php', '.php3', '.php4', '.php5', '.phtml', '.ctp', '.twig', '.blade.php', '.erb', '.haml', '.slim', '.pug', '.jade', '.ejs', '.hbs', '.handlebars', '.mustache', '.dust', '.njk', '.nunjucks', '.liquid', '.svelte', '.vue', '.tsx', '.jsx', '.coffee', '.litcoffee', '.iced', '.ts', '.mts', '.cts'];
+      r.emails = r.emails.filter(email => {
+        if (!validEmailRegex.test(email)) return false;
+        const domain = email.split('@')[1];
+        return !invalidExtensions.some(ext => domain.toLowerCase().endsWith(ext));
+      });
+
+      // --- Téléphone ---
+      // Chercher un lien tel: (visible ou caché)
+      const telLinks = document.querySelectorAll('a[href^="tel:"]');
+      for (const telLink of telLinks) {
+        const telText = telLink.textContent.trim() || telLink.getAttribute('href').replace('tel:', '').trim();
+        if (telText && telText.length >= 10) {
+          r.phone = telText;
+          break;
+        }
+      }
+      // Si pas trouvé, chercher un numéro dans le texte
+      if (!r.phone) {
+        const bodyText = document.body.innerText;
+        // Format français: 0X XX XX XX XX ou 0XXXXXXXXX
+        const phoneMatch = bodyText.match(/\b0\d[\s\.]?(?:\d{2}[\s\.]?){4}\b/);
+        if (phoneMatch) r.phone = phoneMatch[0].replace(/\s+/g, ' ').trim();
+      }
+
+      // --- Code postal (français) ---
+      const cpMatch = document.body.innerText.match(/\b(\d{5})\b/);
+      if (cpMatch) r.postalCode = cpMatch[1];
+
+      // --- Ville (souvent après le code postal) ---
+      if (r.postalCode) {
+        // Chercher le code postal dans le texte et prendre ce qui suit
+        const regex = new RegExp(`\\b${r.postalCode}\\b\\s*([A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ\s-]*?)(?=\\s*[,;]|\\s*$|\\n)`, 'i');
+        const cityMatch = document.body.innerText.match(regex);
+        if (cityMatch && cityMatch[1]) {
+          r.city = cityMatch[1].trim().split(/\s+/).slice(0, 3).join(' '); // Limiter à 3 mots max
+        }
+      }
+
+      // --- Réseaux sociaux ---
       document.querySelectorAll('a[href]').forEach(a => {
         const href = a.href.toLowerCase();
         if (href.includes('facebook.com/') && !href.includes('share') && !href.includes('sharer'))
@@ -1031,7 +1200,7 @@ async function scrapePageForContacts(url) {
         else if (href.includes('linkedin.com/company/')) r.social.linkedin = a.href;
       });
 
-      // Formulaire de contact
+      // --- Formulaire de contact ---
       r.contactForm = Array.from(document.querySelectorAll('form')).some(form => {
         const html = form.outerHTML.toLowerCase();
         const action = form.getAttribute('action') || '';
@@ -1043,7 +1212,7 @@ async function scrapePageForContacts(url) {
           !!form.querySelector('button[type="submit"]');
       });
 
-      // Page de contact
+      // --- Page de contact ---
       const url2 = window.location.href.toLowerCase();
       const title = document.title.toLowerCase();
       const h1 = document.querySelector('h1')?.textContent.toLowerCase() || '';
@@ -1075,46 +1244,142 @@ async function enrichWebsite(lead) {
     const limiter = getDomainLimiter(domain);
     await limiter.acquire(domain);
 
+    // Initialiser l'objet d'enrichissement avec les nouveaux champs
     const enrichment = {
       emails: [], contactPage: null, contactForm: false,
-      social: { facebook: null, instagram: null, linkedin: null }
+      social: { facebook: null, instagram: null, linkedin: null },
+      phone: null, postalCode: null, city: null
     };
 
-    // 1) Page d'accueil
+    // 1) Page d'accueil avec interaction (clic sur boutons téléphone)
+    let homeResult = null;
     try {
-      const home = await scrapePageForContacts(site);
-      mergeEnrichmentData(enrichment, home);
-      logInfo(`Page d'accueil analysée: ${enrichment.emails.length} email(s)`);
-    } catch (err) { logWarning(`Impossible d'ouvrir ${site}: ${err.message}`); }
+      homeResult = await scrapePageForContacts(site);
+      mergeEnrichmentData(enrichment, homeResult);
+      logInfo(`🏠 Page d'accueil analysée: ${enrichment.emails.length} email(s), téléphone: ${enrichment.phone ? '✓' : '✗'}, CP: ${enrichment.postalCode || '✗'}`);
+    } catch (err) { 
+      logWarning(`Impossible d'ouvrir ${site}: ${err.message}`); 
+    }
 
-    // 2) Pages prioritaires
-    const PRIORITY_PATHS = ['/contact', '/contactez-nous', '/nous-contacter', '/mentions-legales', '/about', '/a-propos'];
-    const origin = new URL(site).origin;
-    for (const p of PRIORITY_PATHS) {
-      if (enrichment.emails.length > 0 && enrichment.contactForm) break;
-      const url = `${origin}${p}`;
+    // Mise à jour immédiate du lead avec les données de l'accueil
+    if (enrichment.phone && !lead.telephone) {
+      lead.telephone = enrichment.phone;
+      logInfo(`📞 Téléphone trouvé sur l'accueil: ${lead.telephone}`);
+    }
+    if (enrichment.postalCode && !lead.code_postal) {
+      lead.code_postal = enrichment.postalCode;
+      logInfo(`📮 Code postal trouvé sur l'accueil: ${lead.code_postal}`);
+    }
+    if (enrichment.city && !lead.ville) {
+      lead.ville = enrichment.city;
+      logInfo(`🏙️ Ville trouvée sur l'accueil: ${lead.ville}`);
+    }
+
+    // 2) Si on n'a pas encore d'email OU de téléphone, chercher une page contact sur l'accueil
+    if (enrichment.emails.length === 0 || !enrichment.phone) {
       try {
-        const pageData = await scrapePageForContacts(url);
-        mergeEnrichmentData(enrichment, pageData);
-        await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
+        const browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        await page.goto(site, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        
+        const contactLink = await page.evaluate(() => {
+          const links = Array.from(document.querySelectorAll('a[href]'));
+          const contact = links.find(link => {
+            const text = link.innerText.toLowerCase().trim();
+            const href = link.href.toLowerCase();
+            return text.includes('contact') || href.includes('/contact') || href.includes('/nous-contacter');
+          });
+          return contact ? contact.href : null;
+        });
+        
+        await browser.close();
+        
+        if (contactLink && contactLink !== site) {
+          logInfo(`🔗 Lien vers page contact trouvé: ${contactLink}`);
+          const pageData = await scrapePageForContacts(contactLink);
+          mergeEnrichmentData(enrichment, pageData);
+          
+          // Si on a trouvé une page contact avec des emails, la stocker
+          if (pageData.emails && pageData.emails.length > 0) {
+            enrichment.contactPage = contactLink;
+          }
+          
+          // Mettre à jour le lead avec les nouvelles données de la page contact
+          if (pageData.phone && !lead.telephone) {
+            lead.telephone = pageData.phone;
+            logInfo(`📞 Téléphone trouvé sur page contact: ${lead.telephone}`);
+          }
+          if (pageData.postalCode && !lead.code_postal) {
+            lead.code_postal = pageData.postalCode;
+            logInfo(`📮 Code postal trouvé sur page contact: ${lead.code_postal}`);
+          }
+          if (pageData.city && !lead.ville) {
+            lead.ville = pageData.city;
+            logInfo(`🏙️ Ville trouvée sur page contact: ${lead.ville}`);
+          }
+        }
       } catch (err) {
-        if (!String(err).includes('404')) logWarning(`Erreur sur ${url}: ${err.message}`);
+        logWarning(`Erreur lors de la recherche de lien contact: ${err.message}`);
       }
     }
 
+    // 3) Pages prioritaires (seulement si toujours pas d'email)
+    if (enrichment.emails.length === 0) {
+      const PRIORITY_PATHS = ['/contact', '/contactez-nous', '/nous-contacter', '/mentions-legales', '/about', '/a-propos'];
+      const origin = new URL(site).origin;
+      for (const p of PRIORITY_PATHS) {
+        const url = `${origin}${p}`;
+        try {
+          const pageData = await scrapePageForContacts(url);
+          mergeEnrichmentData(enrichment, pageData);
+          
+          // Mettre à jour le lead avec les nouvelles données
+          if (pageData.phone && !lead.telephone) {
+            lead.telephone = pageData.phone;
+            logInfo(`📞 Téléphone trouvé sur ${p}: ${lead.telephone}`);
+          }
+          if (pageData.postalCode && !lead.code_postal) {
+            lead.code_postal = pageData.postalCode;
+            logInfo(`📮 Code postal trouvé sur ${p}: ${lead.code_postal}`);
+          }
+          if (pageData.city && !lead.ville) {
+            lead.ville = pageData.city;
+            logInfo(`🏙️ Ville trouvée sur ${p}: ${lead.ville}`);
+          }
+          
+          if (enrichment.emails.length > 0) break; // on s'arrête dès qu'on a un email
+          await new Promise(r => setTimeout(r, 1500 + Math.random() * 2000));
+        } catch (err) {
+          if (!String(err).includes('404')) logWarning(`Erreur sur ${url}: ${err.message}`);
+        }
+      }
+    }
+
+    // Dédupliquer les emails
     enrichment.emails = Array.from(new Set(enrichment.emails));
 
+    // Attribuer l'email au lead
     if (enrichment.emails.length > 0) {
       const direct = enrichment.emails.find(e => !/^(contact|info|admin|bonjour|hello|commercial)/i.test(e.split('@')[0]));
       lead.email = normalizeEmail(direct || enrichment.emails[0]);
-      logInfo(`✅ Email: ${lead.email}`);
+      logInfo(`✅ Email trouvé: ${lead.email}`);
     }
-    if (enrichment.contactPage) { lead.url_contact_page = enrichment.contactPage; logInfo(`✅ Page contact: ${enrichment.contactPage}`); }
-    if (enrichment.contactForm) { lead.url_contact_form = origin; logInfo(`✅ Formulaire contact trouvé`); }
+    
+    // Autres enrichissements
+    if (enrichment.contactPage) { 
+      lead.url_contact_page = enrichment.contactPage; 
+      logInfo(`✅ Page contact: ${enrichment.contactPage}`); 
+    }
+    if (enrichment.contactForm) { 
+      lead.url_contact_form = new URL(site).origin; 
+      logInfo(`✅ Formulaire contact trouvé`); 
+    }
     if (enrichment.social.facebook && !lead.facebook_url) { lead.facebook_url = enrichment.social.facebook; }
     if (enrichment.social.instagram && !lead.instagram_url) { lead.instagram_url = enrichment.social.instagram; }
     if (enrichment.social.linkedin && !lead.linkedin_company_url) { lead.linkedin_company_url = enrichment.social.linkedin; }
 
+    // Normalisation
     if (lead.telephone) lead.phone_norm = normalizePhone(lead.telephone);
     lead.domain_norm = normalizeDomain(lead.site_web);
 
@@ -1254,7 +1519,7 @@ async function sendToN8n(lead, sheetId = null) {
       departement: lead.departement || null,
       lat: lead.lat || null,
       lng: lead.lng || null,
-      telephone: lead.telephone || '',
+      telephone: lead.telephone ? lead.telephone.replace(/[^\d]/g, '') : '',
       email: lead.email || null,
       site_web: lead.site_web || null,
       url_contact_page: lead.url_contact_page || null,
@@ -1265,6 +1530,7 @@ async function sendToN8n(lead, sheetId = null) {
       google_place_id: lead.google_place_id || null,
       google_rating: lead.google_rating || null,
       google_reviews_count: lead.google_reviews_count || null,
+      google_maps_url: lead.google_maps_url || null,
       phone_norm: lead.phone_norm || '',
       domain_norm: lead.domain_norm || '',
       name_city_norm: lead.name_city_norm || '',
@@ -1383,12 +1649,26 @@ async function processLead(lead, options = {}) {
   }
 
   // Étape 2.5 — Enrichissement Google Maps (pour leads pauvres uniquement)
+  const oldSiteWeb = lead.site_web; // Mémoriser l'ancien site web
   try {
     lead = await enrichWithGoogleMaps(lead);
     if (crawlBatchId && cancelledBatches.has(crawlBatchId)) throw new Error('CANCELLED');
-  } catch (err) { logWarning(`Erreur enrichissement Google Maps: ${err.message}`); }
+  } catch (err) { 
+    logWarning(`Erreur enrichissement Google Maps: ${err.message}`); 
+  }
 
-  // Normaliser les champs mis à jour par Google Maps
+  // Si Google Maps a ajouté ou changé le site web, et que l'enrichissement site web n'a pas encore été fait (ou n'a pas donné d'email), on le relance
+  if (lead.site_web && lead.site_web !== oldSiteWeb && (!lead.email || lead.email.trim() === '')) {
+    logInfo(`🔄 Nouveau site web détecté via Google Maps, enrichissement site web supplémentaire pour ${lead.nom_entreprise}`);
+    try {
+      lead = await enrichWebsite(lead);
+      if (crawlBatchId && cancelledBatches.has(crawlBatchId)) throw new Error('CANCELLED');
+    } catch (err) { 
+      logWarning(`Erreur enrichissement site web (post-Google): ${err.message}`); 
+    }
+  }
+
+  // Normaliser les champs mis à jour par Google Maps (et éventuellement par le second enrichissement)
   if (lead.telephone) lead.phone_norm = normalizePhone(lead.telephone);
   if (lead.site_web) lead.domain_norm = normalizeDomain(lead.site_web);
 
@@ -1417,15 +1697,12 @@ async function processLead(lead, options = {}) {
     lead.statut_juridique = societeInfo.statut;       // 'ACTIVE' | 'INACTIVE' | 'UNKNOWN' | 'NOT_FOUND'
     lead.societe_url = societeInfo.sourceUrl || null;
 
+    // Log du statut mais on envoie toujours à n8n (même si inactif ou non trouvé)
     if (!societeInfo.active) {
-      // Société inactive ou radiée → on skip l'envoi et on marque le lead
-      logWarning(`🚫 Société inactive/radiée — lead ignoré: "${lead.nom_entreprise}" (${societeInfo.statut})`);
-      lead.status = 'SKIPPED_INACTIVE';
-      lead.last_action_date = new Date().toISOString();
-      return lead; // ← sortie anticipée, pas d'envoi n8n ni HubSpot
+      logWarning(`ℹ️ Société inactive ou non trouvée: "${lead.nom_entreprise}" (${societeInfo.statut}) — lead conservé pour envoi`);
+    } else {
+      logInfo(`✅ Société active — SIRET: ${lead.siret || lead.siren || 'N/A'} — "${lead.nom_entreprise}"`);
     }
-
-    logInfo(`✅ Société active — SIRET: ${lead.siret || lead.siren || 'N/A'} — "${lead.nom_entreprise}"`);
   } catch (err) {
     // En cas d'erreur imprévue on laisse passer le lead (on ne bloque pas)
     logWarning(`Erreur vérification societe.com: ${err.message} — lead conservé`);

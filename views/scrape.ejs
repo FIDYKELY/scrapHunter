@@ -925,10 +925,12 @@
         }
 
         let isScraping = false;
+        let currentBatchId = null;  // ← NOUVEAU: batchId du scraping actif
         let logPollingInterval = null;
         let lastLogTimestamp = null;
-        let _queuePollInterval = null;   // Bug 4: référence unique du polling de queue
-        let _statusPollInterval = null;  // Bug 3: polling de statut pendant le scraping
+        let _queuePollInterval = null;
+        let _statusPollInterval = null;
+        let _batchStatusPollInterval = null;  // ← NOUVEAU: polling spécifique au batch
 
         // Departments data
         const DEPARTMENTS = {
@@ -1062,47 +1064,71 @@
             }
         }
 
-        // Bug 3 — Polling de statut actif pour détecter la fin du scraping (même après stop)
-        function startStatusPolling() {
-            if (_statusPollInterval) clearInterval(_statusPollInterval);
-            _statusPollInterval = setInterval(async () => {
+        // ── NOUVEAU: Polling du statut par batchId ─────────────────────────
+        function startBatchStatusPolling(batchId) {
+            if (_batchStatusPollInterval) clearInterval(_batchStatusPollInterval);
+            
+            _batchStatusPollInterval = setInterval(async () => {
                 try {
-                    const res = await fetch('/scrape/status');
+                    const res = await fetch(`/scrape/status/${batchId}`);
                     const status = await res.json();
-                    if (!status.isRunning && isScraping) {
-                        stopStatusPolling();
+                    
+                    if (status.error && status.error !== 'Scraping arrêté par l\'utilisateur') {
+                        console.error('Erreur batch:', status.error);
+                    }
+                    
+                    // Mise à jour de l'UI avec les infos du batch
+                    if (status.isRunning) {
+                        updateStatus('loading', 'Scraping en cours...', 
+                            `${status.keyword} • ${status.leadsCount} leads traités`);
+                        progressFill.style.width = '60%';
+                    } else if (status.completed) {
+                        // Scraping terminé
+                        stopBatchStatusPolling();
                         stopLogPolling();
                         isScraping = false;
+                        currentBatchId = null;
                         button.disabled = false;
-                        button.style.display = 'inline-block';   // ← bouton start réapparaît
-                        stopButton.style.display = 'none';        // ← bouton stop disparaît
+                        button.style.display = 'inline-block';
+                        stopButton.style.display = 'none';
                         clearScrapingState();
-
-                        if (status.error) {
+                        
+                        if (status.cancelled) {
+                            updateStatus('warning', '⚠️ Scraping interrompu', 
+                                `${status.leadsCount} leads récupérés mais processus arrêté`);
+                            progressFill.style.width = '100%';
+                        } else if (status.error) {
                             updateStatus('error', 'Scraping échoué', status.error);
                             progressFill.style.width = '0%';
                         } else {
-                            updateStatus('success', 'Scraping terminé !', 
-                                `${status.leadsCount ?? 0} leads trouvés`);
-                            leadsCount.textContent = status.leadsCount ?? 0;
-                            resultsSection.style.display = 'block';
+                            updateStatus('success', '✅ Scraping terminé !', 
+                                `${status.leadsCount} leads trouvés`);
                             progressFill.style.width = '100%';
+                            leadsCount.textContent = status.leadsCount;
+                            resultsSection.style.display = 'block';
+                            
+                            // Afficher les stats si disponibles
+                            if (status.stats) {
+                                showStatistics(status.stats);
+                            }
+                            
+                            // Afficher le lien spreadsheet si disponible
+                            if (status.spreadsheetUrl) {
+                                sheetLink.href = status.spreadsheetUrl;
+                                sheetLink.style.display = 'inline-block';
+                            }
                         }
                     }
-                } catch (e) { 
-                    console.error('Erreur polling statut:', e);
-                    // Si erreur réseau, arrêter le polling pour éviter les boucles infinies
-                    if (e.message.includes('Failed to fetch')) {
-                        stopStatusPolling();
-                    }
+                } catch (e) {
+                    console.error('Erreur polling batch:', e);
                 }
-            }, 2000); // Réduit de 5000ms à 2000ms pour une détection plus rapide
+            }, 2000); // Poll toutes les 2 secondes
         }
-
-        function stopStatusPolling() {
-            if (_statusPollInterval) {
-                clearInterval(_statusPollInterval);
-                _statusPollInterval = null;
+        
+        function stopBatchStatusPolling() {
+            if (_batchStatusPollInterval) {
+                clearInterval(_batchStatusPollInterval);
+                _batchStatusPollInterval = null;
             }
         }
 
@@ -1230,7 +1256,12 @@
         confirmStopBtn.addEventListener('click', async () => {
             closeStopModal();
             try {
-                const response = await fetch('/scrape/stop', { method: 'POST' });
+                const body = currentBatchId ? JSON.stringify({ batchId: currentBatchId }) : '{}';
+                const response = await fetch('/scrape/stop', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body
+                });
                 const result = await response.json();
                 if (result.success) {
                     appendLogEntry({ level: 'warning', timestamp: new Date(), message: 'Arrêt demandé par l\'utilisateur...', meta: {} });
@@ -1240,9 +1271,10 @@
                     // Forcer la réinitialisation après 10 secondes si le polling ne fonctionne pas
                     setTimeout(() => {
                         if (stopButton.textContent === 'Arrêt en cours...') {
-                            stopStatusPolling();
+                            stopBatchStatusPolling();
                             stopLogPolling();
                             isScraping = false;
+                            currentBatchId = null;
                             button.disabled = false;
                             button.style.display = 'inline-block';
                             stopButton.style.display = 'none';
@@ -1273,17 +1305,13 @@
                 statusText += ` (${selectedDepartments.length} departments)`;
             }
 
-            updateStatus('loading', 'Scraping in progress...', statusText);
-            progressFill.style.width = '25%';
+            updateStatus('loading', 'Démarrage...', statusText);
+            progressFill.style.width = '10%';
             startLogPolling();
 
-            let result;
             try {
                 // ── ÉTAPE 1 : envoyer la requête au serveur ──────────────────────
-                // On utilise un premier fetch SANS await sur le résultat pour
-                // pouvoir afficher le bouton Stop immédiatement, puis on attend
-                // la réponse dans un second temps via la promesse conservée.
-                const fetchPromise = fetch('/scrape/start', {
+                const response = await fetch('/scrape/start', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1301,99 +1329,68 @@
                     })
                 });
 
-                // ── ÉTAPE 2 : vérifier rapidement si on est en file d'attente ───
-                // On poll /status après 300ms — si isRunning=true le serveur a
-                // bien démarré et on peut afficher le bouton Stop en toute sécurité.
-                await new Promise(resolve => setTimeout(resolve, 300));
-                let statusCheck;
-                try {
-                    const sc = await fetch('/scrape/status');
-                    statusCheck = await sc.json();
-                } catch(e) { statusCheck = {}; }
+                const result = await response.json();
 
-                if (statusCheck.isRunning) {
-                    // ── Scraping vraiment démarré : afficher le bouton Stop ──────
+                // ── GESTION DE LA FILE D'ATTENTE (QUEUE) ────────────────────────────
+                if (result.queued) {
+                    isScraping = false;
+                    button.disabled = false;
+                    button.style.display = 'inline-block';
+                    stopButton.style.display = 'none';
+                    stopLogPolling();
+                    stopBatchStatusPolling();
+                    updateStatus('warning', '⏳ En file d\'attente', `Position : ${result.position}`);
+                    localStorage.setItem('scrapingQueueState', JSON.stringify({
+                        queueId: result.queueId,
+                        keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot, maxPagesPerDept
+                    }));
+                    _startQueuePolling(result.queueId, result.position, keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot);
+                    return;
+                }
+
+                // ── SCRAPING DÉMARRÉ EN ARRIÈRE-PLAN ───────────────────────────────
+                if (result.success && result.batchId) {
+                    currentBatchId = result.batchId;
                     isScraping = true;
+                    
+                    updateStatus('loading', 'Scraping en cours...', 
+                        `${keyword} • batch: ${result.batchId.slice(0, 8)}...`);
+                    progressFill.style.width = '25%';
+                    
+                    // Afficher le bouton Stop
                     button.style.display = 'none';
                     stopButton.style.display = 'inline-block';
                     stopButton.disabled = false;
                     stopButton.textContent = 'Arrêter le processus';
 
+                    // Sauvegarder l'état avec le batchId
                     saveScrapingState({
                         isRunning: true,
+                        batchId: result.batchId,
                         keyword, sources,
                         departments: selectedDepartments,
                         sheetId, destGoogleSheets, destHubSpot,
                         startTime: new Date().toISOString()
                     });
-                    startStatusPolling();
-                }
 
-                // ── ÉTAPE 3 : attendre la fin réelle du scraping ─────────────────
-                const response = await fetchPromise;
-                result = await response.json();
+                    // Démarrer le polling du batch
+                    startBatchStatusPolling(result.batchId);
+                    
+                    console.log('✅ Scraping démarré avec batchId:', result.batchId);
+                } else {
+                    // Erreur au démarrage
+                    throw new Error(result.error || 'Erreur au démarrage du scraping');
+                }
 
             } catch (error) {
-                if (!isScraping) {
-                    updateStatus('error', 'Scraping failed', error.message);
-                    progressFill.style.width = '0%';
-                    button.disabled = false;
-                    button.style.display = 'inline-block';
-                    stopButton.style.display = 'none';
-                    stopLogPolling();
-                    stopStatusPolling();
-                }
-                return;
-            }
-
-            // ── GESTION DE LA FILE D'ATTENTE (QUEUE) ────────────────────────────
-            if (result.queued) {
-                isScraping = false;
+                updateStatus('error', 'Erreur de démarrage', error.message);
+                progressFill.style.width = '0%';
                 button.disabled = false;
                 button.style.display = 'inline-block';
                 stopButton.style.display = 'none';
                 stopLogPolling();
-                stopStatusPolling();
-                updateStatus('warning', '⏳ En file d\'attente', `Position : ${result.position}`);
-                localStorage.setItem('scrapingQueueState', JSON.stringify({
-                    queueId: result.queueId,
-                    keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot, maxPagesPerDept
-                }));
-                _startQueuePolling(result.queueId, result.position, keyword, sources, enableEnrichment, oneByOneProcessing, selectedDepartments, sheetId, destGoogleSheets, destHubSpot);
-                return;
-            }
-
-            // ── SCRAPING TERMINÉ : afficher les résultats ────────────────────────
-            stopLogPolling();
-            stopStatusPolling();
-            isScraping = false;
-            clearScrapingState();
-            button.disabled = false;
-            button.style.display = 'inline-block';
-            stopButton.style.display = 'none';
-
-            if (result.success) {
-                if (result.cancelled) {
-                    updateStatus('warning', '⚠️ Scraping interrompu',
-                        `${result.leadsCount} leads récupérés mais processus arrêté par l'utilisateur`);
-                    progressFill.style.width = '100%';
-                    leadsCount.textContent = result.leadsCount;
-                    resultsSection.style.display = 'block';
-                    if (result.spreadsheetUrl) showDestinationResults(result, destGoogleSheets, false);
-                    if (result.stats) showStatistics(result.stats);
-                } else {
-                    const processingMode = oneByOneProcessing ? 'one by one' : 'in batch';
-                    updateStatus('success', 'Scraping completed!',
-                        `Found ${result.leadsCount} leads${result.enrichment ? ' with enrichment' : ''}${result.n8nSending ? ` and sent to n8n ${processingMode}` : ''}`);
-                    progressFill.style.width = '100%';
-                    leadsCount.textContent = result.leadsCount;
-                    resultsSection.style.display = 'block';
-                    showDestinationResults(result, destGoogleSheets, destHubSpot);
-                    if (result.stats) showStatistics(result.stats);
-                }
-            } else {
-                updateStatus('error', 'Scraping failed', result.error || 'Erreur inconnue');
-                progressFill.style.width = '0%';
+                stopBatchStatusPolling();
+                console.error('Erreur startScraping:', error);
             }
         }
 
@@ -1676,14 +1673,74 @@
                     document.getElementById('maxPagesContainer').style.display = 'block';
                 }
             }
+            // BatchId (nouveau)
+            if (ls.batchId) {
+                currentBatchId = ls.batchId;
+            }
         }
 
         async function checkStatus() {
             try {
+                // ── NOUVEAU: Vérifier d'abord si on a un batchId en cours ─────────
+                const ls = loadScrapingState();
+                if (ls && ls.batchId && ls.isRunning) {
+                    // Vérifier le statut du batch spécifique
+                    const batchRes = await fetch(`/scrape/status/${ls.batchId}`);
+                    const batchStatus = await batchRes.json();
+                    
+                    if (batchStatus.isRunning) {
+                        // Batch toujours en cours → reconnecter l'UI
+                        statusCard.classList.add('active');
+                        currentBatchId = ls.batchId;
+                        updateStatus('loading', 'Scraping en cours (reconnecté)...',
+                            `${batchStatus.keyword} • ${batchStatus.leadsCount} leads traités`);
+                        progressFill.style.width = '60%';
+                        button.disabled = true;
+                        button.style.display = 'none';
+                        stopButton.style.display = 'inline-block';
+                        stopButton.disabled = false;
+                        stopButton.textContent = 'Arrêter le processus';
+                        isScraping = true;
+                        
+                        restoreFormFromState(ls);
+                        startLogPolling();
+                        startBatchStatusPolling(ls.batchId);
+                        return;
+                    } else if (batchStatus.completed) {
+                        // Batch terminé → nettoyer
+                        clearScrapingState();
+                        currentBatchId = null;
+                        
+                        // Afficher le résultat si pas trop vieux (< 5 min)
+                        const startTime = new Date(batchStatus.startTime);
+                        const age = Date.now() - startTime.getTime();
+                        if (age < 5 * 60 * 1000) {
+                            statusCard.classList.add('active');
+                            if (batchStatus.error && !batchStatus.cancelled) {
+                                updateStatus('error', 'Scraping échoué', batchStatus.error);
+                            } else if (batchStatus.cancelled) {
+                                updateStatus('warning', '⚠️ Scraping interrompu', 
+                                    `${batchStatus.leadsCount} leads récupérés`);
+                            } else {
+                                updateStatus('success', '✅ Scraping terminé !', 
+                                    `${batchStatus.leadsCount} leads trouvés`);
+                                leadsCount.textContent = batchStatus.leadsCount;
+                                resultsSection.style.display = 'block';
+                                if (batchStatus.stats) showStatistics(batchStatus.stats);
+                                if (batchStatus.spreadsheetUrl) {
+                                    sheetLink.href = batchStatus.spreadsheetUrl;
+                                    sheetLink.style.display = 'inline-block';
+                                }
+                            }
+                        }
+                        return;
+                    }
+                }
+
+                // ── Fallback sur l'ancien système (legacy) ─────────────────────────
                 const response = await fetch('/scrape/status');
                 const status = await response.json();
 
-                // Scraping actif côté serveur → reconnecter l'UI
                 if (status.isRunning) {
                     statusCard.classList.add('active');
                     const srcLabel = Array.isArray(status.source) ? status.source.join(', ') : status.source;
@@ -1697,7 +1754,6 @@
                     stopButton.textContent = 'Arrêter le processus';
                     isScraping = true;
 
-                    // Restaurer / créer l'état localStorage
                     let ls = loadScrapingState();
                     if (!ls) {
                         ls = {
@@ -1712,22 +1768,20 @@
                         };
                         saveScrapingState(ls);
                     }
-                    // Repopuler le formulaire avec les valeurs sauvegardées
                     restoreFormFromState(ls);
                     startLogPolling();
                     return;
                 }
 
-                // Scraping terminé côté serveur → juste nettoyer localStorage, ne rien afficher
-                const ls = loadScrapingState();
-                if (ls && !status.isRunning) {
+                const lsCheck = loadScrapingState();
+                if (lsCheck && !status.isRunning) {
                     clearScrapingState();
+                    currentBatchId = null;
                 }
 
             } catch (error) {
                 console.error('Error checking status:', error);
 
-                // Côté serveur injoignable — utiliser localStorage comme dernier recours
                 const ls = loadScrapingState();
                 if (ls && ls.isRunning) {
                     statusCard.classList.add('active');

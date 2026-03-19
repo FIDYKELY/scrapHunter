@@ -158,7 +158,7 @@ async function checkCompanyStatus(lead) {
 
     // ── Aucun résultat après toutes les stratégies ───────────────────
     if (!apiData || !apiData.results || apiData.results.length === 0) {
-      logWarning(`🚫 INSEE — introuvable dans le registre: "${lead.nom_entreprise}" → lead ignoré`);
+      logWarning(`🚫 INSEE — introuvable dans le registre: "${lead.nom_entreprise}"`);
       result.statut = 'NOT_FOUND';
       result.active = false;
       return result;

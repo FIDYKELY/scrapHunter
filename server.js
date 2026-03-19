@@ -14,16 +14,26 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Session configuration
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'fallback-secret-change-this',
+// Session configuration with enhanced security
+const sessionConfig = {
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: { 
-    secure: false, // Set to true in production with HTTPS
+  cookie: {
+    secure: process.env.NODE_ENV === 'production', // true en prod avec HTTPS
+    httpOnly: true, // Empêche l'accès JavaScript au cookie
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
-}));
+};
+
+// Vérifier que le secret est défini
+if (!sessionConfig.secret) {
+  console.error('❌ ERREUR: SESSION_SECRET non défini dans les variables d\'environnement');
+  console.error('   Créez un fichier .env avec: SESSION_SECRET=votre_secret_long_et_aleatoire');
+  process.exit(1);
+}
+
+app.use(session(sessionConfig));
 
 // View engine setup
 app.set('view engine', 'ejs');

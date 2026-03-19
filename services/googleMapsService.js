@@ -102,15 +102,14 @@ async function enrichWithGoogleMapsPuppeteer(lead, options = {}) {
   if (!lead || !lead.nom_entreprise) return lead;
   if (lead.google_place_id) return lead;
 
+  // Construction de la requête : nom + code postal (si dispo) ou ville
   const name = String(lead.nom_entreprise).trim();
-  const hintParts = [];
-  if (lead.adresse_complete) hintParts.push(String(lead.adresse_complete).trim());
-  if (lead.ville) hintParts.push(String(lead.ville).trim());
-  if (lead.departement) hintParts.push(String(lead.departement).trim());
-  const query = [name, ...hintParts].filter(Boolean).join(' ');
-
-  // URL directe de recherche (souvent plus stable et évite certaines pages intermédiaires)
-  const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+  const cp = lead.code_postal ? String(lead.code_postal).trim() : null;
+  const city = lead.ville ? String(lead.ville).trim() : null;
+  const locationPart = cp || city || '';
+  
+  const query = locationPart ? `${name} ${locationPart}` : name;
+  const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
 
   // Liste d'user-agents aléatoires
   const userAgents = [
@@ -124,18 +123,14 @@ async function enrichWithGoogleMapsPuppeteer(lead, options = {}) {
   try {
     await GMAPS_RATE_LIMITER.acquire('google-maps-web');
 
-    browser = await puppeteer.launch({
-      headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    
+    browser = await puppeteer.launch({ headless: 'new', args: ['--no-sandbox', '--disable-setuid-sandbox'] });
     const page = await browser.newPage();
     
     // User-agent aléatoire
     const ua = userAgents[Math.floor(Math.random() * userAgents.length)];
     await page.setUserAgent(ua);
 
-    // Blocage des ressources inutiles pour accélérer
+    // Blocage des ressources inutiles
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       const type = req.resourceType();
@@ -146,24 +141,16 @@ async function enrichWithGoogleMapsPuppeteer(lead, options = {}) {
       }
     });
 
-    const response = await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 120000
-    });
-
+    // Aller à la page de recherche
+    const response = await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 120000 });
     logInfo(`📶 Google Maps HTTP Status: ${response?.status()} pour ${lead.nom_entreprise}`);
 
-    // Gestion des cookies (version allemande comme dans votre exemple)
+    // Gestion des cookies (identique)
     try {
-      await page.waitForSelector('button[aria-label="Alle ablehnen"], button[aria-label*="Accepter"], button:has-text("Tout accepter")', { 
-        visible: true, 
-        timeout: 10000 
-      });
-      
+      await page.waitForSelector('button[aria-label="Alle ablehnen"], button[aria-label*="Accepter"], button:has-text("Tout accepter")', { visible: true, timeout: 10000 });
       const consentButton = await page.$('button[aria-label="Alle ablehnen"]') ||
                            await page.$('button[aria-label*="Accepter"]') ||
                            await page.$('button:has-text("Tout accepter")');
-      
       if (consentButton) {
         await consentButton.click({ delay: 100 });
         logInfo("✅ Cookies Google Maps rejetés/acceptés");
@@ -173,8 +160,6 @@ async function enrichWithGoogleMapsPuppeteer(lead, options = {}) {
     } catch (err) {
       logInfo("ℹ️ Aucun bouton de consentement Google Maps détecté");
     }
-
-    await new Promise(r => setTimeout(r, 8000));
 
     // Vérification CAPTCHA
     const isCaptcha = await page.evaluate(() => {
@@ -186,165 +171,210 @@ async function enrichWithGoogleMapsPuppeteer(lead, options = {}) {
       return lead;
     }
 
-    // Extraction des données avec sélecteurs multiples et robustes
+    // Attendre que la liste des résultats apparaisse (ou qu'on soit directement sur une fiche)
+    await new Promise(r => setTimeout(r, 5000));
+
+    // Vérifier si on est sur une page de liste de résultats
+    const hasList = await page.evaluate(() => {
+      return document.querySelectorAll('.Nv2PK, [data-result-index], [role="article"]').length > 0;
+    });
+
+    let selectedUrl = null;
+
+    if (hasList) {
+      logInfo("🔍 Liste de résultats détectée, recherche du meilleur correspondant...");
+      
+      // Récupérer les informations des premiers résultats (par ex. les 5 premiers)
+      const results = await page.evaluate(() => {
+        const items = [];
+        const nodes = document.querySelectorAll('.Nv2PK, [data-result-index], [role="article"]');
+        for (let i = 0; i < Math.min(nodes.length, 5); i++) {
+          const node = nodes[i];
+          const title = node.querySelector('.qBF1Pd, .fontHeadlineSmall, [data-attrid="title"], h3')?.innerText?.trim() || '';
+          const address = node.querySelector('.W4Efsd span, [data-dtype="d3gf"]')?.innerText?.trim() || '';
+          // Récupérer le lien vers la fiche (souvent un attribut href sur le conteneur ou un lien interne)
+          const link = node.querySelector('a[href*="/place/"]')?.getAttribute('href') || null;
+          items.push({ title, address, link });
+        }
+        return items;
+      });
+
+      // Calculer un score de similarité pour chaque résultat
+      const nameLower = name.toLowerCase();
+      const cpLower = cp ? cp.toLowerCase() : '';
+      const cityLower = city ? city.toLowerCase() : '';
+
+      let bestScore = -1;
+      let bestResult = null;
+
+      for (const res of results) {
+        let score = 0;
+        const titleLower = res.title.toLowerCase();
+        const addressLower = res.address.toLowerCase();
+
+        // Le titre doit contenir le nom (ou une partie significative)
+        if (titleLower.includes(nameLower) || nameLower.includes(titleLower)) {
+          score += 10;
+        }
+        // Bonus si le code postal est présent dans l'adresse
+        if (cpLower && addressLower.includes(cpLower)) {
+          score += 20;
+        } else if (cityLower && addressLower.includes(cityLower)) {
+          score += 15;
+        }
+        // Si le titre et l'adresse sont très similaires, on augmente le score
+        // (on peut ajouter d'autres heuristiques)
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestResult = res;
+        }
+      }
+
+      if (bestResult && bestResult.link) {
+        // Construire l'URL complète (parfois le lien est relatif)
+        const placeUrl = bestResult.link.startsWith('http') ? bestResult.link : `https://www.google.com${bestResult.link}`;
+        logInfo(`✅ Résultat sélectionné: ${bestResult.title} (score ${bestScore})`);
+        
+        // Aller directement à l'URL de la fiche (évite un clic)
+        await page.goto(placeUrl, { waitUntil: 'networkidle2', timeout: 60000 });
+        selectedUrl = placeUrl;
+      } else {
+        // Fallback : cliquer sur le premier résultat
+        logWarning("Aucun résultat pertinent trouvé, clic sur le premier");
+        await page.click('.Nv2PK, [data-result-index], [role="article"]');
+        await page.waitForFunction(() => {
+          return window.location.href.includes('/place/') || document.querySelector('.RcCslf') !== null;
+        }, { timeout: 15000 });
+        selectedUrl = page.url();
+      }
+    } else {
+      // Probablement déjà sur une page de détail
+      logInfo("ℹ️ Page de détail détectée directement");
+      selectedUrl = page.url();
+    }
+
+    // Attendre que la page de détail soit bien chargée
+    await new Promise(r => setTimeout(r, 3000));
+
+    // Extraire les informations depuis la fiche détaillée (sélecteurs spécifiques)
     const data = await page.evaluate(() => {
       const out = {
         placeUrl: window.location.href,
-        ratingText: null,
-        reviewsText: null,
         website: null,
         phone: null,
         address: null,
         title: null
       };
 
-      // Utilisation des sélecteurs de votre exemple + alternatives
-      const nodes = document.querySelectorAll('.Nv2PK, [data-result-index], [role="article"]');
-      if (nodes.length > 0) {
-        // On est sur une liste de résultats, on prend le premier
-        const firstNode = nodes[0];
-        
-        // Titre - plusieurs sélecteurs possibles
-        out.title = firstNode.querySelector('.qBF1Pd, .fontHeadlineSmall, [data-attrid="title"], h3')?.innerText?.trim() || null;
-        
-        // Adresse - sélecteurs multiples
-        const addressSelectors = ['.W4Efsd span', '[data-dtype="d3gf"]', '[data-attrid="address"]', '.fontBodyMedium'];
-        for (const selector of addressSelectors) {
-          const addr = Array.from(firstNode.querySelectorAll(selector))
-            .map(e => e.textContent)
-            .find(t => t?.match(/\d{1,3}\s\w+/) || t?.includes('Rue') || t?.includes('Bd') || t?.includes('Avenue') || t?.includes('Saint'));
-          if (addr) {
-            out.address = addr;
-            break;
-          }
-        }
-        
-        // Téléphone - sélecteurs multiples
-        const phoneSelectors = ['.UsdlK', '[data-dtype="d3ph"]', '[data-attrid="phone"]', '[aria-label*="téléphone"]', '[aria-label*="phone"]'];
-        for (const selector of phoneSelectors) {
-          const phoneEl = firstNode.querySelector(selector);
-          if (phoneEl) {
-            const phoneText = phoneEl.innerText || phoneEl.getAttribute('aria-label');
-            if (phoneText && phoneText.match(/[\d\s().-]{10,}/)) {
-              out.phone = phoneText.trim();
-              break;
-            }
-          }
-        }
-        
-        // Site web - sélecteurs multiples
-        const websiteSelectors = ['a[href*="http"]', '[data-attrid="website"]', '[data-dtype="d3cw"]'];
-        for (const selector of websiteSelectors) {
-          const websiteEl = firstNode.querySelector(selector);
-          if (websiteEl) {
-            const href = websiteEl.getAttribute('href');
-            if (href && href.startsWith('http')) {
-              out.website = href;
-              break;
-            }
-          }
-        }
-        
-        // Si on n'a pas trouvé de téléphone/site web, essayer sur toute la page
-        if (!out.phone || !out.website) {
-          const allText = document.body.innerText;
-          
-          // Recherche de téléphone dans tout le texte
-          if (!out.phone) {
-            const phoneMatch = allText.match(/(?:0\d{9}|[+]\d{11}|\d{2}\s\d{2}\s\d{2}\s\d{2}\s\d{2})/);
-            if (phoneMatch) out.phone = phoneMatch[0];
-          }
-          
-          // Recherche de site web dans tout le texte
-          if (!out.website) {
-            const websiteMatch = allText.match(/https?:\/\/[^\s\)]+/g);
-            if (websiteMatch && websiteMatch.length > 0) {
-              out.website = websiteMatch[0];
-            }
-          }
-        }
-      } else {
-        // On est sur une page de détail - sélecteurs plus larges
-        const ratingEl = Array.from(document.querySelectorAll('[aria-label]'))
-          .find(el => (el.getAttribute('aria-label') || '').toLowerCase().includes('étoile'));
-        if (ratingEl) out.ratingText = ratingEl.getAttribute('aria-label');
+      // Sélecteurs pour la fiche détaillée
+      const titleSel = document.querySelector('h1, .DUwDvf, .fontHeadlineLarge');
+      if (titleSel) out.title = titleSel.innerText;
 
-        const reviewsEl = Array.from(document.querySelectorAll('[aria-label]'))
-          .find(el => (el.getAttribute('aria-label') || '').toLowerCase().includes('avis'));
-        if (reviewsEl) out.reviewsText = reviewsEl.getAttribute('aria-label');
+      const websiteSel = document.querySelector('a[data-item-id="authority"], a[href*="http"]:not([href*="google"])');
+      if (websiteSel) out.website = websiteSel.href || websiteSel.getAttribute('href');
 
-        // Site web - sélecteurs multiples
-        const websiteSelectors = ['a[data-attrid="website"]', '[data-dtype="d3cw"]', 'a[href*="http"]:not([href*="google"])'];
-        for (const selector of websiteSelectors) {
-          const websiteEl = document.querySelector(selector);
-          if (websiteEl) {
-            const href = websiteEl.getAttribute('href');
-            if (href && href.startsWith('http') && !href.includes('google')) {
-              out.website = href;
-              break;
-            }
-          }
-        }
-        
-        // Téléphone - sélecteurs multiples
-        const phoneSelectors = ['[data-dtype="d3ph"]', '[data-attrid="phone"]', '[aria-label*="téléphone"]', '[aria-label*="phone"]'];
-        for (const selector of phoneSelectors) {
-          const phoneEl = document.querySelector(selector);
-          if (phoneEl) {
-            const phoneText = phoneEl.innerText || phoneEl.getAttribute('aria-label');
-            if (phoneText && phoneText.match(/[\d\s().-]{10,}/)) {
-              out.phone = phoneText.trim();
-              break;
-            }
-          }
-        }
-        
-        // Adresse - sélecteurs multiples
-        const addressSelectors = ['[data-dtype="d3gf"]', '[data-attrid="address"]', '[aria-label*="adresse"]'];
-        for (const selector of addressSelectors) {
-          const addrEl = document.querySelector(selector);
-          if (addrEl) {
-            const addrText = addrEl.innerText || addrEl.getAttribute('aria-label');
-            if (addrText && addrText.length > 10) {
-              out.address = addrText.trim();
-              break;
-            }
-          }
-        }
+      const phoneSel = document.querySelector('button[data-item-id="phone"], a[href^="tel:"]');
+      if (phoneSel) {
+        out.phone = phoneSel.innerText || phoneSel.getAttribute('aria-label');
+      }
+
+      const addressSel = document.querySelector('button[data-item-id="address"], [data-item-id="address"]');
+      if (addressSel) {
+        out.address = addressSel.innerText || addressSel.getAttribute('aria-label');
+      }
+
+      // Fallback si les sélecteurs spécifiques échouent
+      if (!out.website) {
+        const fallbackWebsite = document.querySelector('a[href*="http"]:not([href*="google"])');
+        out.website = fallbackWebsite?.href || null;
+      }
+      if (!out.phone) {
+        const fallbackPhone = document.querySelector('[aria-label*="téléphone"], [aria-label*="phone"]');
+        out.phone = fallbackPhone?.innerText || null;
       }
 
       return out;
     });
 
-    // Traitement des données trouvées
+    // --- Nettoyage du téléphone : extraire uniquement le numéro ---
     if (data.phone) {
-      // Ajouter le téléphone si pas existant OU si le nouveau est meilleur (plus long)
+      // Extraire le premier groupe de chiffres (au moins 10 chiffres) avec +, espaces, tirets, parenthèses
+      const phoneMatch = data.phone.match(/[\d\s\+\(\)\-]{10,}/);
+      if (phoneMatch) {
+        data.phone = phoneMatch[0].trim();
+        logInfo(`📞 Téléphone nettoyé: ${data.phone}`);
+      } else {
+        // Si aucun format valide, on ignore
+        data.phone = null;
+      }
+    }
+
+    // --- Résolution des URLs de redirection Google ---
+    if (data.website && data.website.includes('google.com/url?q=')) {
+      try {
+        const urlParams = new URLSearchParams(new URL(data.website).search);
+        const realUrl = urlParams.get('q');
+        if (realUrl) {
+          data.website = realUrl;
+          logInfo(`🔗 URL de redirection Google résolue: ${realUrl}`);
+        }
+      } catch (e) {
+        logWarning(`Impossible de parser l'URL de redirection: ${data.website}`);
+      }
+    }
+
+    // Mise à jour du lead
+    if (data.phone) {
       if (!lead.telephone || (data.phone.length > lead.telephone.length && data.phone.match(/\d/))) {
         lead.telephone = data.phone;
       }
     }
-    
-    // Ne PAS utiliser les URLs Google Maps comme sites web
     if (data.website && !data.website.includes('google.com/maps') && (allowWebsiteOverride || !lead.site_web)) {
       lead.site_web = data.website;
     }
+    // Optionnel : stocker l'URL de la fiche Google Maps
+    if (data.placeUrl && data.placeUrl.includes('/place/')) {
+      lead.google_maps_url = data.placeUrl;
+    }
 
-    // Log détaillé des enrichissements avec debug
+    // --- Extraction du code postal et de la ville depuis l'adresse Google Maps ---
+    if (data.address) {
+      // Recherche d'un code postal français (5 chiffres)
+      const cpMatch = data.address.match(/\b(\d{5})\b/);
+      if (cpMatch) {
+        const cp = cpMatch[1];
+        if (!lead.code_postal) {
+          lead.code_postal = cp;
+          logInfo(`📮 Code postal trouvé: ${cp}`);
+        }
+        // La ville est souvent après le code postal
+        const parts = data.address.split(cp);
+        if (parts.length > 1) {
+          // Prendre la partie après le code postal, enlever les séparateurs
+          let cityPart = parts[1].trim().replace(/^[,\s-]+/, '').split(',')[0].trim();
+          // Nettoyer (enlever les caractères inutiles)
+          cityPart = cityPart.replace(/[^\w\s-]/g, '').trim();
+          if (cityPart && !lead.ville) {
+            lead.ville = cityPart;
+            logInfo(`🏙️ Ville trouvée: ${cityPart}`);
+          }
+        }
+      }
+    }
+
+    // Log détaillé des enrichissements
     const enrichissements = [];
-    
-    // Vérifier si le téléphone a été ajouté/mis à jour
     if (data.phone && (!lead.telephone || data.phone !== lead.telephone)) {
       enrichissements.push(`📞 téléphone: ${data.phone}`);
     }
-    
-    // Vérifier si le site web a été ajouté (non-Google Maps)
     if (data.website && !data.website.includes('google.com/maps') && (allowWebsiteOverride || !lead.site_web)) {
       enrichissements.push(`🌐 site web: ${data.website}`);
     }
 
-    // Log de debug complet pour analyser ce qui est trouvé
     logInfo(`🗺️ Google Maps (web) enrichi: ${lead.nom_entreprise}`, {
       enrichissements: enrichissements.length > 0 ? enrichissements.join(', ') : 'aucun nouvel ajout',
+      selectedUrl,
       newPhone: !!(data.phone && (!lead.telephone || data.phone !== lead.telephone)),
       newWebsite: !!(data.website && !data.website.includes('google.com/maps') && (allowWebsiteOverride || !lead.site_web)),
       foundData: {
@@ -352,16 +382,6 @@ async function enrichWithGoogleMapsPuppeteer(lead, options = {}) {
         website: !!data.website && !data.website.includes('google.com/maps'),
         address: !!data.address,
         title: !!data.title
-      },
-      debugData: {
-        phoneFound: data.phone || null,
-        websiteFound: data.website || null,
-        addressFound: data.address || null,
-        titleFound: data.title || null,
-        existingPhone: lead.telephone || null,
-        existingWebsite: lead.site_web || null,
-        phoneUpdated: data.phone !== lead.telephone,
-        websiteIgnored: data.website?.includes('google.com/maps') || false
       }
     });
 

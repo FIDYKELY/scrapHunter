@@ -81,139 +81,112 @@ class ScrapeController {
       return res.json({ queued: true, position: queued.position, queueId: queued.queueId });
     }
 
-    // ── DÉMARRAGE ──────────────────────────────────────────────────────
+    // ── DÉMARRAGE ASYNCHRONE ───────────────────────────────────────────
     globalScrapingActive = true;
 
-    try {
-      const batchId = uuidv4();
-      console.log(`🚀 Starting scraping: keyword="${keyword}", sources="${sources.join(',')}", departments="${departments.length > 0 ? departments.join(',') : 'ALL'}"`);
-      console.log(`📤 Destinations: Google Sheets=${destGoogleSheets}, HubSpot=${destHubSpot}`);
+    const batchId = uuidv4();
+    
+    // Initialiser la map des statuts si nécessaire
+    req.session.scrapingStatuses = req.session.scrapingStatuses || {};
+    
+    // Créer le statut initial pour ce batch
+    req.session.scrapingStatuses[batchId] = {
+      isRunning: true,
+      keyword,
+      source: sources,
+      departments,
+      startTime: new Date(),
+      leadsCount: 0,
+      enrichmentEnabled: enableEnrichment,
+      n8nEnabled: enableN8nSending && destGoogleSheets,
+      oneByOneProcessing,
+      destGoogleSheets,
+      destHubSpot,
+      crawlBatchId: batchId,
+      error: null,
+      completed: false,
+      cancelled: false,
+      stats: null,
+      spreadsheetUrl: null
+    };
 
-      req.session.scrapingStatus = {
-        isRunning: true,
-        keyword,
-        source: sources,
-        departments,
-        startTime: new Date(),
-        leadsCount: 0,
-        enrichmentEnabled: enableEnrichment,
-        n8nEnabled: enableN8nSending && destGoogleSheets,
-        oneByOneProcessing,
-        destGoogleSheets,
-        destHubSpot,
-        crawlBatchId: batchId // Store for cancellation
-      };
+    console.log(`🚀 Starting scraping: keyword="${keyword}", sources="${sources.join(',')}", batchId="${batchId}"`);
+    console.log(`📤 Destinations: Google Sheets=${destGoogleSheets}, HubSpot=${destHubSpot}`);
 
-      // Force session save so parallel requests (like /stop or /status) can read it
-      // before the long await blocks the request completion.
-      await new Promise((resolve, reject) => {
-        req.session.save((err) => {
-          if (err) return reject(err);
-          resolve();
+    // Sauvegarder la session avant de lancer le processus en arrière-plan
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+
+    // ── LANCER LE SCRAPING EN ARRIÈRE-PLAN ────────────────────────────
+    (async () => {
+      try {
+        const results = await legacyScraper.mainProcess(keyword, sources, departments, {
+          sheetId,
+          enableN8nSending: enableN8nSending && destGoogleSheets,
+          enableHubSpot: destHubSpot,
+          maxPagesPerDept: maxPagesPerDept || 0,
+          crawlBatchId: batchId
         });
-      });
 
-      // ── SCRAPING + ENRICHISSEMENT ─────────────────────────────────────
-      // On désactive l'envoi n8n interne si Google Sheets n'est pas coché
-      const results = await legacyScraper.mainProcess(keyword, sources, departments, {
-        sheetId,
-        enableN8nSending: enableN8nSending && destGoogleSheets,
-        enableHubSpot:    destHubSpot,   // envoi immédiat lead par lead
-        maxPagesPerDept: maxPagesPerDept || 0,
-        crawlBatchId:     batchId
-      });
-
-      const leads = results.leads || [];
-
-      req.session.scrapingStatus.leadsCount = results.successful;
-      
-      // Vérifier si le processus a été annulé avant de continuer
-      const isCancelled = !!results.cancelled || legacyScraper.isCancelled(batchId);
-      if (isCancelled) {
-        req.session.scrapingStatus.isRunning = false;
-        req.session.scrapingStatus.error = 'Scraping arrêté par l\'utilisateur';
-        console.log(`🛑 Processus annulé, arrêt avant envoi HubSpot`);
+        const leads = results.leads || [];
+        const status = req.session.scrapingStatuses[batchId];
         
-        // Libérer la variable globale et la file d'attente
+        if (status) {
+          status.isRunning = false;
+          status.completed = true;
+          status.leadsCount = results.successful;
+          status.cancelled = !!results.cancelled;
+          
+          if (results.cancelled) {
+            status.error = 'Scraping arrêté par l\'utilisateur';
+          }
+
+          // Calculer les stats
+          status.stats = this.calculateStats(leads);
+          
+          // URL du spreadsheet si disponible
+          if (sheetId) {
+            status.spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+          }
+        }
+
+        // Sauvegarder la session
+        await new Promise((resolve) => req.session.save(resolve));
+        
+        console.log(`✅ Batch ${batchId} terminé: ${results.successful} leads traités`);
+
+      } catch (error) {
+        console.error(`❌ Batch ${batchId} erreur:`, error.message);
+        
+        const status = req.session.scrapingStatuses[batchId];
+        if (status) {
+          status.isRunning = false;
+          status.completed = true;
+          status.error = error.message;
+          status.cancelled = false;
+        }
+        
+        await new Promise((resolve) => req.session.save(resolve));
+      } finally {
         globalScrapingActive = false;
         dequeueNext();
-        
-        return res.json({
-          success: true,
-          message: `${results.successful} leads récupérés mais processus arrêté`,
-          leadsCount: results.successful,
-          keyword,
-          source: sources,
-          enrichment: enableEnrichment,
-          n8nSending: false, // Pas d'envoi si annulé
-          oneByOneProcessing,
-          stats: this.calculateStats(leads),
-          spreadsheetUrl: sheetId ? `https://docs.google.com/spreadsheets/d/${sheetId}/edit` : null,
-          hubspot: null, // Pas d'envoi HubSpot si annulé
-          processingTime: Math.round((Date.now() - req.session.scrapingStatus.startTime.getTime()) / 1000),
-          cancelled: true // Indiquer que c'est un arrêt manuel
-        });
+        if (scrapingQueue.length > 0) {
+          console.log(`📋 Queue: ${scrapingQueue.length} scraping(s) en attente — prochain: ${scrapingQueue[0].queueId}`);
+        }
       }
-      
-      req.session.scrapingStatus.isRunning = false;
-      if (sheetId) req.session.scrapingStatus.sheetId = sheetId;
+    })();
 
-      // ── HUBSPOT ── (envoi déjà effectué lead par lead dans processLead)
-      let hubspotStats = null;
-      if (destHubSpot && leads.length > 0) {
-        const sent    = leads.filter(l => l.hubspot_company_id).length;
-        const skipped = leads.filter(l => l.status === 'SKIPPED_INACTIVE').length;
-        const failed  = leads.filter(l => !l.hubspot_company_id && l.status !== 'SKIPPED_INACTIVE').length;
-        hubspotStats  = { sent, skipped, failed, note: 'Envoi effectué en temps réel' };
-        console.log(`🟠 HubSpot: ${sent} lead(s) envoyés en temps réel, ${skipped} ignorés (inactifs), ${failed} échecs`);
-      }
-
-      // ── STATS ─────────────────────────────────────────────────────────
-      const stats = this.calculateStats(leads);
-
-      // Construct spreadsheetUrl if sheetId exists
-      let spreadsheetUrl = null;
-      if (sheetId) {
-        spreadsheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
-        req.session.scrapingStatus.spreadsheetUrl = spreadsheetUrl;
-        await new Promise((resolve) => req.session.save(() => resolve()));
-      }
-
-      return res.json({
-        success: true,
-        message: `${results.successful} leads traités avec succès`,
-        leadsCount: results.successful,
-        keyword,
-        source: sources,
-        enrichment: enableEnrichment,
-        n8nSending: enableN8nSending && destGoogleSheets,
-        oneByOneProcessing,
-        stats,
-        spreadsheetUrl, // Return to frontend
-        hubspot: hubspotStats,
-        processingTime: Math.round((Date.now() - req.session.scrapingStatus.startTime.getTime()) / 1000)
-      });
-
-    } catch (error) {
-      console.error('❌ Scraping controller error:', error.message);
-
-      if (req.session.scrapingStatus) {
-        req.session.scrapingStatus.isRunning = false;
-        req.session.scrapingStatus.error = error.message;
-      }
-
-      res.status(500).json({
-        success: false,
-        error: error.message
-      });
-    } finally {
-      // ── LIBÉRER LA FILE D'ATTENTE ──────────────────────────────────
-      globalScrapingActive = false;
-      dequeueNext(); // signale au prochain qu'il peut démarrer
-      if (scrapingQueue.length > 0) {
-        console.log(`📋 Queue: ${scrapingQueue.length} scraping(s) en attente — prochain: ${scrapingQueue[0].queueId}`);
-      }
-    }
+    // Réponse immédiate au client avec le batchId
+    return res.json({
+      success: true,
+      message: 'Scraping démarré en arrière-plan',
+      batchId,
+      queued: false
+    });
   }
 
   calculateStats(leads) {
@@ -248,8 +221,55 @@ class ScrapeController {
     return stats;
   }
 
+  // ── NOUVELLE MÉTHODE: Statut d'un batch spécifique ────────────────
+  async getBatchStatus(req, res) {
+    const { batchId } = req.params;
+    
+    if (!batchId) {
+      return res.status(400).json({ error: 'batchId manquant' });
+    }
+
+    const statuses = req.session.scrapingStatuses || {};
+    const status = statuses[batchId];
+
+    if (!status) {
+      return res.status(404).json({ error: 'Batch non trouvé' });
+    }
+
+    // Réponse légère avec seulement les infos utiles
+    res.json({
+      batchId,
+      isRunning: status.isRunning,
+      completed: status.completed,
+      cancelled: status.cancelled,
+      error: status.error,
+      leadsCount: status.leadsCount,
+      stats: status.stats || null,
+      startTime: status.startTime,
+      spreadsheetUrl: status.spreadsheetUrl || null,
+      keyword: status.keyword,
+      source: status.source
+    });
+  }
+
+  // ── MÉTHODE LEGACY: Pour compatibilité avec l'ancien frontend ────
   async getScrapingStatus(req, res) {
-    const status = req.session.scrapingStatus || {
+    // Chercher le dernier batch actif ou le plus récent
+    const statuses = req.session.scrapingStatuses || {};
+    
+    // Chercher un batch en cours
+    let activeBatch = Object.values(statuses).find(s => s.isRunning);
+    
+    // Sinon prendre le plus récent complété
+    if (!activeBatch) {
+      const sorted = Object.values(statuses).sort((a, b) => 
+        new Date(b.startTime) - new Date(a.startTime)
+      );
+      activeBatch = sorted[0];
+    }
+
+    // Fallback sur l'ancien format pour compatibilité
+    const status = activeBatch || req.session.scrapingStatus || {
       isRunning: false,
       leadsCount: 0,
       spreadsheetUrl: null
@@ -259,39 +279,55 @@ class ScrapeController {
   }
 
   resetScrapingStatus(req, res) {
-    req.session.scrapingStatus = {
-      isRunning: false,
-      leadsCount: 0,
-      spreadsheetUrl: null
-    };
-
-    res.json({ success: true, message: 'Scraping status reset' });
+    req.session.scrapingStatuses = {};
+    req.session.scrapingStatus = { isRunning: false, leadsCount: 0, spreadsheetUrl: null };
+    res.json({ success: true, message: 'All scraping statuses reset' });
   }
 
+  // ── MODIFIÉ: Stop scraping avec batchId ──────────────────────────
   stopScraping(req, res) {
-    if (req.session.scrapingStatus && req.session.scrapingStatus.crawlBatchId) {
-      const batchId = req.session.scrapingStatus.crawlBatchId;
-      console.log(`🛑 Stopping scrape batch: ${batchId}`);
-      if (typeof legacyScraper.cancelScrape === 'function') {
-        legacyScraper.cancelScrape(batchId);
+    const { batchId } = req.body;
+
+    if (!batchId) {
+      // Fallback sur l'ancien comportement si pas de batchId
+      if (req.session.scrapingStatus && req.session.scrapingStatus.crawlBatchId) {
+        const oldBatchId = req.session.scrapingStatus.crawlBatchId;
+        console.log(`🛑 Stopping scrape batch (legacy): ${oldBatchId}`);
+        if (typeof legacyScraper.cancelScrape === 'function') {
+          legacyScraper.cancelScrape(oldBatchId);
+        }
+        req.session.scrapingStatus.isRunning = false;
+        req.session.scrapingStatus.error = 'Scraping arrêté par l\'utilisateur';
+        req.session.save((err) => {
+          if (err) console.error('Erreur sauvegarde session:', err);
+        });
+        return res.json({ success: true, message: 'Stop signal sent' });
       }
-      
-      // Mettre à jour l'état de la session pour que le frontend détecte l'arrêt
-      req.session.scrapingStatus.isRunning = false;
-      req.session.scrapingStatus.error = 'Scraping arrêté par l\'utilisateur';
-      
-      // NOTE: on ne remet PAS globalScrapingActive à false ici
-      // La libération est gérée par le finally de startScraping
-      
-      // Forcer la sauvegarde de la session
-      req.session.save((err) => {
-        if (err) console.error('Erreur sauvegarde session:', err);
-      });
-      
-      res.json({ success: true, message: 'Stop signal sent' });
-    } else {
-      res.status(400).json({ error: 'No active scraping process found in session.' });
+      return res.status(400).json({ error: 'batchId manquant' });
     }
+
+    const statuses = req.session.scrapingStatuses || {};
+    const status = statuses[batchId];
+
+    if (!status || !status.crawlBatchId) {
+      return res.status(404).json({ error: 'Batch non trouvé ou déjà terminé' });
+    }
+
+    console.log(`🛑 Stopping scrape batch: ${batchId}`);
+    if (typeof legacyScraper.cancelScrape === 'function') {
+      legacyScraper.cancelScrape(status.crawlBatchId);
+    }
+
+    // Mettre à jour le statut
+    status.isRunning = false;
+    status.cancelled = true;
+    status.error = 'Scraping arrêté par l\'utilisateur';
+
+    req.session.save((err) => {
+      if (err) console.error('Erreur sauvegarde session:', err);
+    });
+
+    res.json({ success: true, message: 'Stop signal sent' });
   }
 
   // Nouvelle méthode pour tester uniquement l'envoi n8n

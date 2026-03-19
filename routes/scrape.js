@@ -43,9 +43,14 @@ router.post('/test-webhook', isAuthenticatedAPI, (req, res) => {
   scrapeController.testN8nWebhook(req, res);
 });
 
-// Get scraping status
+// Get scraping status (legacy - dernier batch)
 router.get('/status', isAuthenticatedAPI, (req, res) => {
   scrapeController.getScrapingStatus(req, res);
+});
+
+// Get batch status (nouveau - batch spécifique)
+router.get('/status/:batchId', isAuthenticatedAPI, (req, res) => {
+  scrapeController.getBatchStatus(req, res);
 });
 
 // Reset scraping status
