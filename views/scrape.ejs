@@ -345,6 +345,22 @@
             color: #333;
         }
 
+        .monitoring-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+            margin: 0 1rem;
+            padding: 0.3rem 0.8rem;
+            border-radius: 4px;
+            background: #f0f0ff;
+            transition: background 0.2s;
+            display: inline-block;
+        }
+        .monitoring-link:hover {
+            background: #e0e0ff;
+            color: #5a6fd8;
+        }
+
         .btn-info {
             display: inline-block;
             padding: 0.75rem 1.5rem;
@@ -728,6 +744,9 @@
             <span>
                 <%= user.email %>
             </span>
+            <% if (user.role === 'admin') { %>
+                <a href="/scrape/monitoring-view" class="monitoring-link">📊 Monitoring</a>
+            <% } %>
             <a href="/logout" class="logout-link">Déconnexion</a>
         </div>
     </header>

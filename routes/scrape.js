@@ -34,7 +34,7 @@ function isAuthenticatedAPI(req, res, next) {
 // Scrape page (protected route)
 router.get('/', isAuthenticated, (req, res) => {
   res.render('scrape', { 
-    user: { email: req.session.userEmail },
+    user: { email: req.session.userEmail, role: req.session.userRole },
     scrapingStatus: req.session.scrapingStatus || null
   });
 });
