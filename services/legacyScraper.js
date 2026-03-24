@@ -1888,10 +1888,230 @@ function isCancelled(batchId) {
 // ─────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────
+// ─────────────────────────────────────────────
+// APIFY IMPORT — Conversion + Enrichissement
+// ─────────────────────────────────────────────
+
+/**
+ * Convertit un enregistrement brut Apify Google Maps en objet lead normalisé.
+ * Les champs Apify sont : title, totalScore, reviewsCount, street, city, state,
+ * countryCode, website, phone, categories/0…N, url, categoryName
+ */
+function buildLeadFromApifyRecord(record, crawlBatchId) {
+  if (!record || !record.title) return null;
+
+  // Extraire le code postal depuis la rue si présent (pattern FR: 5 chiffres)
+  const streetRaw   = record.street  || '';
+  const cityRaw     = record.city    || '';
+  const cpMatch     = streetRaw.match(/\b(\d{5})\b/) || cityRaw.match(/\b(\d{5})\b/);
+  const code_postal = cpMatch ? cpMatch[1] : null;
+
+  // Construire l'adresse complète
+  const adresseParts = [streetRaw, cityRaw].filter(Boolean);
+  const adresse_complete = adresseParts.join(', ') || null;
+
+  // Normaliser le téléphone
+  const telephone = record.phone ? String(record.phone).trim() : null;
+  const phone_norm = telephone ? telephone.replace(/[^\d]/g, '') : '';
+
+  // Site web — nettoyer les params UTM pour avoir l'URL de base
+  let site_web = record.website || null;
+  if (site_web) {
+    try {
+      const u = new URL(site_web);
+      // Conserver l'URL sans les params UTM pour éviter les doublons
+      u.searchParams.delete('utm_source');
+      u.searchParams.delete('utm_medium');
+      u.searchParams.delete('utm_campaign');
+      u.searchParams.delete('utm_content');
+      u.searchParams.delete('utm_term');
+      site_web = u.toString().replace(/[?&]$/, '');
+    } catch (_) { /* URL invalide, on garde telle quelle */ }
+  }
+
+  // Note Google : Apify retourne parfois "4,9" (virgule FR) au lieu de "4.9"
+  let google_rating = null;
+  if (record.totalScore != null) {
+    const raw = String(record.totalScore).replace(',', '.');
+    const n = parseFloat(raw);
+    if (Number.isFinite(n)) google_rating = n;
+  }
+
+  // Nombre d'avis
+  const google_reviews_count = record.reviewsCount != null ? parseInt(record.reviewsCount, 10) || null : null;
+
+  // Catégories → deduire le type_profil
+  const categories = [];
+  for (let i = 0; i <= 9; i++) {
+    const cat = record[`categories/${i}`] || record.categories?.[i];
+    if (cat) categories.push(String(cat).toLowerCase());
+  }
+  const categoryName = (record.categoryName || '').toLowerCase();
+  const allCats = [...categories, categoryName].join(' ');
+
+  let type_profil = 'AGENCE';
+  if (/indépendant|independant|freelance|auto.entrepreneur/i.test(record.title)) {
+    type_profil = 'INDEPENDANT';
+  } else if (/orpi|century\s*21|laforêt|laforet|guy\s*hoquet|era\s|fnaim|stéphane\s*plaza|nexity|foncia/i.test(record.title)) {
+    type_profil = 'AGENCE_RESEAU';
+  }
+
+  // google_place_id extrait depuis l'URL Apify
+  let google_place_id = null;
+  if (record.url) {
+    const pidMatch = record.url.match(/query_place_id=([^&]+)/);
+    if (pidMatch) google_place_id = decodeURIComponent(pidMatch[1]);
+  }
+
+  const domain_norm = site_web ? normalizeDomain(site_web) : '';
+  const name_city_norm = normalizeNameCity(record.title, adresse_complete);
+
+  return {
+    lead_id: uuidv4(),
+    source: 'apify_google_maps',
+    source_url: record.url || null,
+    type_profil,
+    nom_entreprise: String(record.title).trim(),
+    date_import: new Date().toISOString(),
+    crawl_batch_id: crawlBatchId,
+    adresse_complete,
+    code_postal,
+    ville: cityRaw || null,
+    departement: code_postal ? code_postal.substring(0, 2) : null,
+    lat: null, lng: null,
+    telephone,
+    email: null,          // sera enrichi via site web
+    site_web,
+    url_contact_page: null,
+    url_contact_form: null,
+    linkedin_company_url: null,
+    facebook_url: null,
+    instagram_url: null,
+    google_place_id,
+    google_rating,
+    google_reviews_count,
+    phone_norm,
+    domain_norm,
+    name_city_norm,
+    is_duplicate: false,
+    duplicate_of_lead_id: null,
+    data_quality: (telephone && site_web) ? 'HIGH' : (telephone || site_web) ? 'MEDIUM' : 'LOW',
+    missing: [
+      ...(!telephone ? ['telephone'] : []),
+      ...(!site_web  ? ['site_web']  : []),
+      'email'
+    ],
+    score_global: null, priorite: null, reason: null,
+    status: 'NEW',
+    assigned_to: null,
+    last_action_date: null,
+    notes: allCats ? `Catégories: ${allCats}` : null,
+    keyword: categoryName || 'apify_import'
+  };
+}
+
+/**
+ * Traite un tableau de records Apify : conversion → enrichissement → scoring → envoi
+ * Réutilise exactement processLead() — même pipeline que le scraping normal.
+ *
+ * @param {Object[]} records       — données brutes Apify
+ * @param {Object}   options
+ * @param {boolean}  options.enableN8nSending
+ * @param {boolean}  options.enableHubSpot
+ * @param {string}   [options.sheetId]
+ * @param {string}   [options.crawlBatchId]
+ * @param {number}   [options.concurrency=2]
+ * @param {number}   [options.delayBetweenLeads=5000]
+ */
+async function processApifyData(records, options = {}) {
+  const {
+    enableN8nSending   = true,
+    enableHubSpot      = false,
+    sheetId            = null,
+    crawlBatchId       = uuidv4(),
+    concurrency        = 2,
+    delayBetweenLeads  = 5000
+  } = options;
+
+  if (!records || records.length === 0) {
+    return { leads: [], total: 0, successful: 0, failed: 0, cancelled: false };
+  }
+
+  // 1. Convertir tous les records en leads normalisés
+  const rawLeads = records
+    .map(r => buildLeadFromApifyRecord(r, crawlBatchId))
+    .filter(Boolean);
+
+  if (sheetId && rawLeads.length) {
+    rawLeads.forEach(l => { l.sheetId = sheetId; });
+  }
+
+  logInfo(`📥 Apify import: ${rawLeads.length} leads convertis (${records.length} records reçus)`);
+
+  const results = { total: rawLeads.length, successful: 0, failed: 0, leads: [] };
+  let wasCancelled = false;
+
+  // 2. Traiter par lots — même logique que mainProcess
+  for (let i = 0; i < rawLeads.length; i += concurrency) {
+    if (cancelledBatches.has(crawlBatchId)) {
+      logWarning('🛑 Import Apify annulé.');
+      wasCancelled = true;
+      break;
+    }
+
+    const batch = rawLeads.slice(i, i + concurrency);
+    const batchResults = await Promise.allSettled(
+      batch.map(async (lead, idx) => {
+        if (cancelledBatches.has(crawlBatchId)) throw new Error('Cancelled');
+        if (idx > 0) await cancellableSleep(2000, crawlBatchId);
+        // Réutiliser exactement le même pipeline d'enrichissement
+        return processLead(lead, {
+          enableWebsiteEnrichment: true,
+          enableSocialEnrichment: true,
+          enableN8nSending,
+          enableHubSpot,
+          crawlBatchId
+        });
+      })
+    );
+
+    for (const res of batchResults) {
+      if (res.status === 'fulfilled') {
+        results.successful++;
+        results.leads.push(res.value);
+        logInfo(`✅ Apify lead traité: ${res.value.nom_entreprise}`, {
+          score: res.value.score_global,
+          priorite: res.value.priorite
+        });
+      } else {
+        results.failed++;
+        logError(`❌ Erreur lead Apify: ${res.reason?.message}`);
+      }
+    }
+
+    if (i + concurrency < rawLeads.length) {
+      logInfo(`⏳ Pause ${delayBetweenLeads}ms…`);
+      if (await cancellableSleep(delayBetweenLeads, crawlBatchId)) break;
+    }
+
+    const progress = Math.round(((i + concurrency) / rawLeads.length) * 100);
+    logInfo(`📊 Apify progression: ${Math.min(progress, 100)}% (${Math.min(i + concurrency, rawLeads.length)}/${rawLeads.length})`);
+  }
+
+  logInfo(`🎉 Import Apify terminé: ${results.successful}/${results.total} leads traités`);
+
+  if (!wasCancelled && cancelledBatches.has(crawlBatchId)) wasCancelled = true;
+  results.cancelled = wasCancelled;
+  cancelledBatches.delete(crawlBatchId);
+
+  return results;
+}
+
 module.exports = {
   mainProcess,
+  processApifyData,
   cancelScrape,
-  isCancelled, // Exporter la fonction de vérification
+  isCancelled,
   scrapeOpenStreetMap,
   scrapePagesJaunes,
   enrichWebsite,
@@ -1900,8 +2120,7 @@ module.exports = {
   withUpdatedScore,
   sendToN8n,
   generateTestData,
-  cancelledBatches, // Exporter pour vérification dans le contrôleur
-  // Helpers utilitaires
+  cancelledBatches,
   normalizePhone,
   formatPhoneForSheets,
   normalizeEmail,

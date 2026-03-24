@@ -734,8 +734,237 @@
         .dest-result-block a {
             color: #28a745;
         }
+        /* ── Import Apify ── */
+        .apify-card {
+            background: white;
+            border-radius: 10px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-top: 2rem;
+        }
+        .apify-card h2 {
+            color: #333;
+            margin-bottom: 0.4rem;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .apify-card .apify-subtitle {
+            color: #888;
+            font-size: 0.88rem;
+            margin-bottom: 1.5rem;
+        }
+        .apify-drop-zone {
+            border: 2px dashed #c4c9d4;
+            border-radius: 8px;
+            padding: 2rem 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+            background: #fafbfc;
+            position: relative;
+        }
+        .apify-drop-zone:hover, .apify-drop-zone.drag-over {
+            border-color: #667eea;
+            background: #f0f0ff;
+        }
+        .apify-drop-zone input[type="file"] {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+        .apify-drop-zone .dz-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+        .apify-drop-zone .dz-text { color: #555; font-size: 0.95rem; }
+        .apify-drop-zone .dz-hint { color: #aaa; font-size: 0.8rem; margin-top: 0.25rem; }
+        .apify-file-info {
+            margin-top: 0.75rem;
+            padding: 0.6rem 1rem;
+            background: #e8f5e9;
+            border-radius: 6px;
+            font-size: 0.88rem;
+            color: #2e7d32;
+            display: none;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .apify-file-info.visible { display: flex; }
+        .apify-file-info .fi-remove {
+            margin-left: auto;
+            cursor: pointer;
+            color: #888;
+            font-size: 1rem;
+            line-height: 1;
+        }
+        .apify-file-info .fi-remove:hover { color: #dc3545; }
+        .apify-dest-row {
+            display: flex;
+            gap: 1rem;
+            margin: 1.25rem 0;
+            flex-wrap: wrap;
+        }
+        .apify-dest-row .dest-option {
+            flex: 1;
+            min-width: 180px;
+            margin-bottom: 0;
+        }
+        .apify-progress {
+            margin-top: 1rem;
+            display: none;
+        }
+        .apify-progress.visible { display: block; }
+        .apify-progress-label {
+            font-size: 0.88rem;
+            color: #555;
+            margin-bottom: 0.4rem;
+            display: flex;
+            justify-content: space-between;
+        }
+        .apify-progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .apify-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #f7971e, #ffd200);
+            width: 0%;
+            transition: width 0.4s ease;
+        }
+        .apify-result {
+            margin-top: 1rem;
+            padding: 0.9rem 1rem;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            display: none;
+        }
+        .apify-result.visible { display: block; }
+        .apify-result.ok { background: #f0fff4; border-left: 4px solid #28a745; color: #1a5c2a; }
+        .apify-result.error { background: #fff5f5; border-left: 4px solid #dc3545; color: #7b1c1c; }
+        .apify-result.warning { background: #fffbea; border-left: 4px solid #ffc107; color: #6b4f00; }
+        .apify-btn {
+            background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%);
+            color: #333;
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin-top: 0.5rem;
+        }
+        .apify-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(247,151,30,0.35);
+        }
+        .apify-btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .apify-stop-btn {
+            background: linear-gradient(135deg, #e53935 0%, #b71c1c 100%);
+            color: white;
+            border: none;
+            padding: 0.6rem 2rem;
+            border-radius: 5px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 0.5rem;
+            transition: all 0.3s ease;
+            display: none;
+        }
+        .apify-stop-btn:hover:not(:disabled) {
+            box-shadow: 0 4px 8px rgba(220,53,69,0.3);
+        }
+        .apify-stats {
+            margin-top: 1rem;
+            display: none;
+        }
+        .apify-stats.visible { display: block; }
+
+        /* ── Tabs ── */
+        .tabs-nav {
+            display: flex;
+            gap: 0;
+            background: white;
+            border-radius: 12px 12px 0 0;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            margin-bottom: 0;
+        }
+        .tab-btn {
+            flex: 1;
+            padding: 1rem 1.5rem;
+            border: none;
+            background: #f1f3f5;
+            color: #666;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            position: relative;
+            border-bottom: 3px solid transparent;
+        }
+        .tab-btn:hover:not(.active):not(.locked) {
+            background: #e9ecef;
+            color: #333;
+        }
+        .tab-btn.active {
+            background: white;
+            color: #333;
+            border-bottom-color: #667eea;
+        }
+        .tab-btn.active .tab-icon {
+            transform: scale(1.15);
+        }
+        .tab-btn.locked {
+            opacity: 0.45;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .tab-btn .tab-icon {
+            font-size: 1.2rem;
+            transition: transform 0.3s ease;
+        }
+        .tab-btn .tab-label {
+            transition: color 0.3s ease;
+        }
+        .tab-btn .tab-lock-icon {
+            font-size: 0.8rem;
+            margin-left: 0.25rem;
+            display: none;
+        }
+        .tab-btn.locked .tab-lock-icon {
+            display: inline;
+        }
+        .tab-panel {
+            display: none;
+        }
+        .tab-panel.active {
+            display: block;
+            animation: fadeInTab 0.3s ease;
+        }
+        @keyframes fadeInTab {
+            from { opacity: 0; transform: translateY(6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .tab-panel > .scrape-card,
+        .tab-panel > .apify-card {
+            border-radius: 0 0 12px 12px;
+            margin-top: 0;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
     </style>
-</head>
 
 <body>
     <header class="header">
@@ -752,6 +981,22 @@
     </header>
 
     <div class="container">
+        <!-- ═══ TABS NAVIGATION ═══ -->
+        <div class="tabs-nav" id="tabsNav">
+            <button type="button" class="tab-btn active" data-tab="scraping" id="tabBtnScraping">
+                <span class="tab-icon">🔍</span>
+                <span class="tab-label">Scraping Normal</span>
+                <span class="tab-lock-icon">🔒</span>
+            </button>
+            <button type="button" class="tab-btn" data-tab="apify" id="tabBtnApify">
+                <span class="tab-icon">🟡</span>
+                <span class="tab-label">Import Apify</span>
+                <span class="tab-lock-icon">🔒</span>
+            </button>
+        </div>
+
+        <!-- ═══ TAB PANEL: SCRAPING NORMAL ═══ -->
+        <div class="tab-panel active" id="panelScraping" data-tab="scraping">
         <div class="scrape-card">
             <h2>Commencer le Scraping</h2>
             <form id="scrapeForm">
@@ -913,7 +1158,88 @@
                 <div id="statisticsContainer"></div>
             </div>
         </div>
+
+    </div><!-- /panelScraping -->
+
+    <!-- ═══ TAB PANEL: IMPORT APIFY ═══ -->
+    <div class="tab-panel" id="panelApify" data-tab="apify">
+    <div class="apify-card" id="apifyCard">
+        <h2>🟡 Import Apify Google Maps</h2>
+        <p class="apify-subtitle">Uploadez le fichier JSON exporté depuis Apify (Google Maps Scraper). Les leads seront enrichis (site web, réseaux sociaux, INSEE) puis envoyés à la destination choisie.</p>
+
+        <!-- Zone de dépôt fichier -->
+        <div class="apify-drop-zone" id="apifyDropZone">
+            <input type="file" id="apifyFileInput" accept=".json,application/json">
+            <div class="dz-icon">📂</div>
+            <div class="dz-text">Glissez votre fichier JSON ici, ou cliquez pour sélectionner</div>
+            <div class="dz-hint">Format attendu : tableau JSON ou objet avec propriété <code>items</code> / <code>results</code></div>
+        </div>
+        <div class="apify-file-info" id="apifyFileInfo">
+            <span>📄</span>
+            <span id="apifyFileName">—</span>
+            <span id="apifyRecordCount" style="font-weight:600;"></span>
+            <span class="fi-remove" id="apifyFileRemove" title="Supprimer">✕</span>
+        </div>
+
+        <!-- Destinations -->
+        <div class="apify-dest-row">
+            <div class="dest-option" id="apifyDestGSOption">
+                <label class="checkbox-label dest-label">
+                    <input type="checkbox" id="apifyDestGS" checked>
+                    <span class="dest-icon-wrap">
+                        <span class="dest-icon">📊</span>
+                        <span class="dest-text">
+                            <strong>Google Sheets</strong>
+                            <small>Via webhook n8n</small>
+                        </span>
+                    </span>
+                </label>
+            </div>
+            <div class="dest-option" id="apifyDestHSOption">
+                <label class="checkbox-label dest-label">
+                    <input type="checkbox" id="apifyDestHS">
+                    <span class="dest-icon-wrap">
+                        <span class="dest-icon">🟠</span>
+                        <span class="dest-text">
+                            <strong>HubSpot CRM</strong>
+                            <small>Company + Contact par lead</small>
+                        </span>
+                        <span id="apifyHubspotBadge" class="dest-badge badge-checking">...</span>
+                    </span>
+                </label>
+            </div>
+        </div>
+        <div id="apifyDestError" style="display:none; color:#dc3545; font-size:0.85rem; margin-bottom:0.5rem;">
+            ⚠️ Veuillez sélectionner au moins une destination.
+        </div>
+
+        <!-- Boutons -->
+        <button class="apify-btn" id="apifyStartBtn" disabled>
+            ⚡ Lancer l'import et l'enrichissement
+        </button>
+        <button class="apify-stop-btn" id="apifyStopBtn">
+            Arrêter l'import
+        </button>
+
+        <!-- Barre de progression -->
+        <div class="apify-progress" id="apifyProgress">
+            <div class="apify-progress-label">
+                <span id="apifyProgressLabel">Import en cours…</span>
+                <span id="apifyProgressLeads">0 leads traités</span>
+            </div>
+            <div class="apify-progress-bar">
+                <div class="apify-progress-fill" id="apifyProgressFill"></div>
+            </div>
+        </div>
+
+        <!-- Résultat -->
+        <div class="apify-result" id="apifyResult"></div>
+
+        <!-- Stats -->
+        <div class="apify-stats" id="apifyStats"></div>
     </div>
+    </div><!-- /panelApify -->
+    </div><!-- /container -->
 
     <div class="modal-overlay" id="stopModal">
         <div class="modal-content">
@@ -961,6 +1287,40 @@
             try { localStorage.removeItem(LS_KEY); } catch (e) { }
         }
 
+        // ── Tab switching ─────────────────────────────────────────────────
+        let activeTabMode = null; // 'scraping' | 'apify' | null — tracks which mode is running
+
+        function switchTab(tabName) {
+            if (activeTabMode) return; // locked — cannot switch
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabName);
+            });
+            document.querySelectorAll('.tab-panel').forEach(panel => {
+                panel.classList.toggle('active', panel.dataset.tab === tabName);
+            });
+        }
+
+        function lockTabs(runningTab) {
+            activeTabMode = runningTab;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                if (btn.dataset.tab !== runningTab) {
+                    btn.classList.add('locked');
+                }
+            });
+        }
+
+        function unlockTabs() {
+            activeTabMode = null;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('locked');
+            });
+        }
+
+        // Bind tab clicks
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+        });
+
         let isScraping = false;
         let currentBatchId = null;  // ← NOUVEAU: batchId du scraping actif
         let logPollingInterval = null;
@@ -968,6 +1328,7 @@
         let _queuePollInterval = null;
         let _statusPollInterval = null;
         let _batchStatusPollInterval = null;  // ← NOUVEAU: polling spécifique au batch
+
 
         // Departments data
         const DEPARTMENTS = {
@@ -1129,6 +1490,7 @@
                         button.style.display = 'inline-block';
                         stopButton.style.display = 'none';
                         clearScrapingState();
+                        unlockTabs();
                         
                         if (status.cancelled) {
                             updateStatus('warning', '⚠️ Scraping interrompu', 
@@ -1389,6 +1751,7 @@
                 if (result.success && result.batchId) {
                     currentBatchId = result.batchId;
                     isScraping = true;
+                    lockTabs('scraping');
                     
                     updateStatus('loading', 'Scraping en cours...', 
                         `${keyword} • batch: ${result.batchId.slice(0, 8)}...`);
@@ -1427,6 +1790,7 @@
                 stopButton.style.display = 'none';
                 stopLogPolling();
                 stopBatchStatusPolling();
+                unlockTabs();
                 console.error('Erreur startScraping:', error);
             }
         }
@@ -1672,6 +2036,7 @@
             button.disabled = false;
             button.style.display = 'inline-block';
             stopButton.style.display = 'none';
+            unlockTabs();
         }
 
         // ── Reconnexion automatique au chargement ───────────────────────
@@ -1738,6 +2103,7 @@
                         stopButton.disabled = false;
                         stopButton.textContent = 'Arrêter le processus';
                         isScraping = true;
+                        lockTabs('scraping');
                         
                         restoreFormFromState(ls);
                         startLogPolling();
@@ -1774,44 +2140,11 @@
                     }
                 }
 
-                // ── Fallback sur l'ancien système (legacy) ─────────────────────────
-                const response = await fetch('/scrape/status');
-                const status = await response.json();
-
-                if (status.isRunning) {
-                    statusCard.classList.add('active');
-                    const srcLabel = Array.isArray(status.source) ? status.source.join(', ') : status.source;
-                    updateStatus('loading', 'Scraping in progress...',
-                        `Scraping ${status.keyword} from ${srcLabel}...`);
-                    progressFill.style.width = '50%';
-                    button.disabled = true;
-                    button.style.display = 'none';
-                    stopButton.style.display = 'inline-block';
-                    stopButton.disabled = false;
-                    stopButton.textContent = 'Arrêter le processus';
-                    isScraping = true;
-
-                    let ls = loadScrapingState();
-                    if (!ls) {
-                        ls = {
-                            isRunning: true,
-                            keyword: status.keyword,
-                            sources: Array.isArray(status.source) ? status.source : [status.source],
-                            departments: status.departments || [],
-                            sheetId: status.sheetId || null,
-                            destGoogleSheets: status.destGoogleSheets !== false,
-                            destHubSpot: !!status.destHubSpot,
-                            startTime: status.startTime || new Date().toISOString()
-                        };
-                        saveScrapingState(ls);
-                    }
-                    restoreFormFromState(ls);
-                    startLogPolling();
-                    return;
-                }
-
+                // Pas de batchId en localStorage → rien à reconnecter
+                // (Supprimé le fallback legacy qui faisait fetch('/scrape/status')
+                //  et déclenchait un faux positif de scraping actif au chargement)
                 const lsCheck = loadScrapingState();
-                if (lsCheck && !status.isRunning) {
+                if (lsCheck) {
                     clearScrapingState();
                     currentBatchId = null;
                 }
@@ -1900,6 +2233,313 @@
             }
         }
         checkHubSpotStatus();
+
+        // ══════════════════════════════════════════════════════════════
+        // IMPORT APIFY — logique JS complète
+        // ══════════════════════════════════════════════════════════════
+
+        let _apifyRecords    = null;   // tableau JSON parsé
+        let _apifyBatchId    = null;   // batchId en cours
+        let _apifyPollTimer  = null;   // setInterval polling
+
+        const apifyFileInput    = document.getElementById('apifyFileInput');
+        const apifyDropZone     = document.getElementById('apifyDropZone');
+        const apifyFileInfo     = document.getElementById('apifyFileInfo');
+        const apifyFileName     = document.getElementById('apifyFileName');
+        const apifyRecordCount  = document.getElementById('apifyRecordCount');
+        const apifyFileRemove   = document.getElementById('apifyFileRemove');
+        const apifyStartBtn     = document.getElementById('apifyStartBtn');
+        const apifyStopBtn      = document.getElementById('apifyStopBtn');
+        const apifyProgress     = document.getElementById('apifyProgress');
+        const apifyProgressFill = document.getElementById('apifyProgressFill');
+        const apifyProgressLbl  = document.getElementById('apifyProgressLabel');
+        const apifyProgressLeads= document.getElementById('apifyProgressLeads');
+        const apifyResultEl     = document.getElementById('apifyResult');
+        const apifyStatsEl      = document.getElementById('apifyStats');
+        const apifyDestGS       = document.getElementById('apifyDestGS');
+        const apifyDestHS       = document.getElementById('apifyDestHS');
+        const apifyDestError    = document.getElementById('apifyDestError');
+
+        // ── Drag & drop ──────────────────────────────────────────────
+        apifyDropZone.addEventListener('dragover',  e => { e.preventDefault(); apifyDropZone.classList.add('drag-over'); });
+        apifyDropZone.addEventListener('dragleave', ()=> apifyDropZone.classList.remove('drag-over'));
+        apifyDropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            apifyDropZone.classList.remove('drag-over');
+            const file = e.dataTransfer.files[0];
+            if (file) apifyParseFile(file);
+        });
+        apifyFileInput.addEventListener('change', () => {
+            if (apifyFileInput.files[0]) apifyParseFile(apifyFileInput.files[0]);
+        });
+        apifyFileRemove.addEventListener('click', apifyClearFile);
+
+        function apifyParseFile(file) {
+            if (!file.name.endsWith('.json') && file.type !== 'application/json') {
+                apifyShowResult('error', '⚠️ Fichier invalide. Veuillez sélectionner un fichier <strong>.json</strong>.');
+                return;
+            }
+            if (file.size > 50 * 1024 * 1024) { // 50 Mo max
+                apifyShowResult('error', '⚠️ Fichier trop volumineux (max 50 Mo).');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    let parsed = JSON.parse(e.target.result);
+                    // Tolérance : objet wrapper
+                    if (!Array.isArray(parsed)) {
+                        parsed = parsed.items || parsed.results || parsed.data || null;
+                    }
+                    if (!Array.isArray(parsed) || parsed.length === 0) {
+                        apifyShowResult('error', '⚠️ Le fichier JSON ne contient aucun enregistrement valide. Attendu : tableau ou objet avec propriété <code>items</code>/<code>results</code>.');
+                        return;
+                    }
+                    if (parsed.length > 5000) {
+                        apifyShowResult('warning', `⚠️ Le fichier contient ${parsed.length} enregistrements — seuls les 5000 premiers seront traités.`);
+                        parsed = parsed.slice(0, 5000);
+                    }
+
+                    _apifyRecords = parsed;
+                    apifyFileName.textContent    = file.name;
+                    apifyRecordCount.textContent = `— ${parsed.length} enregistrement(s)`;
+                    apifyFileInfo.classList.add('visible');
+                    apifyStartBtn.disabled = false;
+                    apifyResultEl.classList.remove('visible');
+                    apifyStatsEl.classList.remove('visible');
+                } catch (err) {
+                    apifyShowResult('error', `⚠️ Erreur de parsing JSON : ${err.message}`);
+                }
+            };
+            reader.readAsText(file, 'utf-8');
+        }
+
+        function apifyClearFile() {
+            _apifyRecords = null;
+            apifyFileInput.value = '';
+            apifyFileInfo.classList.remove('visible');
+            apifyFileName.textContent    = '—';
+            apifyRecordCount.textContent = '';
+            apifyStartBtn.disabled = true;
+            apifyResultEl.classList.remove('visible');
+            apifyStatsEl.classList.remove('visible');
+            apifyProgress.classList.remove('visible');
+        }
+
+        // ── Lancer l'import ──────────────────────────────────────────
+        apifyStartBtn.addEventListener('click', async () => {
+            if (!_apifyRecords || _apifyRecords.length === 0) return;
+
+            const destGS = apifyDestGS.checked;
+            const destHS = apifyDestHS.checked;
+
+            if (!destGS && !destHS) {
+                apifyDestError.style.display = 'block';
+                return;
+            }
+            apifyDestError.style.display = 'none';
+
+            // Créer le Google Sheet si nécessaire
+            let sheetId = null;
+            if (destGS) {
+                try {
+                    const sheetResp = await fetch('/scrape/create-sheet', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ keyword: 'apify_import', userEmail: '<%= user.email %>' })
+                    });
+                    if (sheetResp.ok) {
+                        const sheetRaw = await sheetResp.text();
+                        try {
+                            const sheetData = JSON.parse(sheetRaw);
+                            if (sheetData && sheetData.spreadsheetId) sheetId = sheetData.spreadsheetId;
+                        } catch (_) { console.warn('Réponse create-sheet non-JSON'); }
+                    } else {
+                        // create-sheet indisponible — on continue sans sheet, les leads
+                        // seront quand même envoyés via n8n (le sheetId restera null)
+                        console.warn(`create-sheet: ${sheetResp.status} — import continuera sans Google Sheet`);
+                    }
+                } catch (err) { console.warn('Impossible de créer le sheet:', err.message); }
+            }
+
+            // UI → état "en cours"
+            apifyStartBtn.disabled = true;
+            apifyStartBtn.textContent = '⏳ Import en cours…';
+            apifyStopBtn.style.display = 'block';
+            apifyProgress.classList.add('visible');
+            apifyProgressFill.style.width = '5%';
+            apifyProgressLbl.textContent = 'Démarrage…';
+            apifyProgressLeads.textContent = '0 leads traités';
+            apifyResultEl.classList.remove('visible');
+            apifyStatsEl.classList.remove('visible');
+
+            try {
+                const resp = await fetch('/scrape/apify-import', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        records:          _apifyRecords,
+                        destGoogleSheets: destGS,
+                        destHubSpot:      destHS,
+                        sheetId
+                    })
+                });
+
+                // Lire la réponse comme texte d'abord pour éviter le crash
+                // "Unexpected token '<'" si le serveur retourne du HTML en cas d'erreur
+                const rawText = await resp.text();
+                let data;
+                try {
+                    data = JSON.parse(rawText);
+                } catch (_) {
+                    // Le serveur a retourné du HTML (page d'erreur 500, 404, etc.)
+                    throw new Error(`Erreur serveur (${resp.status}) — vérifiez les logs.`);
+                }
+
+                if (!resp.ok || !data.success) {
+                    throw new Error(data.error || `Erreur serveur (${resp.status})`);
+                }
+
+                _apifyBatchId = data.batchId;
+                apifyProgressFill.style.width = '15%';
+                apifyProgressLbl.textContent = `Import en cours… (batch: ${data.batchId.slice(0,8)}…)`;
+
+                // Démarrer le polling
+                apifyStartPolling(data.batchId, sheetId, _apifyRecords.length);
+
+            } catch (err) {
+                apifyOnError(err.message);
+            }
+        });
+
+        // ── Arrêt ─────────────────────────────────────────────────────
+        apifyStopBtn.addEventListener('click', async () => {
+            if (!_apifyBatchId) return;
+            apifyStopBtn.disabled = true;
+            apifyStopBtn.textContent = 'Arrêt en cours…';
+            try {
+                await fetch('/scrape/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ batchId: _apifyBatchId })
+                });
+            } catch (e) { console.error('Erreur stop apify:', e); }
+        });
+
+        // ── Polling statut batch ──────────────────────────────────────
+        function apifyStartPolling(batchId, sheetId, totalRecords) {
+            if (_apifyPollTimer) clearInterval(_apifyPollTimer);
+            let fakeProgress = 15;
+
+            _apifyPollTimer = setInterval(async () => {
+                try {
+                    const r = await fetch(`/scrape/status/${batchId}`);
+                    const status = await r.json();
+
+                    // Progression "vivante" tant que le batch tourne
+                    if (status.isRunning) {
+                        if (fakeProgress < 90) fakeProgress += 2;
+                        apifyProgressFill.style.width = `${fakeProgress}%`;
+                        const leads = status.leadsCount || 0;
+                        apifyProgressLeads.textContent = `${leads} / ~${totalRecords} leads traités`;
+                        apifyProgressLbl.textContent = 'Enrichissement en cours…';
+                    }
+
+                    if (status.completed) {
+                        clearInterval(_apifyPollTimer);
+                        _apifyPollTimer = null;
+                        apifyProgressFill.style.width = '100%';
+
+                        if (status.cancelled) {
+                            apifyProgressLbl.textContent = 'Import interrompu';
+                            apifyShowResult('warning', `⚠️ Import arrêté — <strong>${status.leadsCount}</strong> leads traités avant l'arrêt.`);
+                        } else if (status.error) {
+                            apifyOnError(status.error);
+                        } else {
+                            apifyProgressLbl.textContent = 'Import terminé !';
+                            let msg = `✅ Import terminé — <strong>${status.leadsCount}</strong> leads enrichis et envoyés.`;
+                            if (sheetId) {
+                                const url = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+                                msg += ` <a href="${url}" target="_blank" style="color:#155724;font-weight:600;">Ouvrir le Google Sheet →</a>`;
+                            }
+                            apifyShowResult('ok', msg);
+                            if (status.stats) apifyShowStats(status.stats);
+                        }
+
+                        // Remettre les boutons en état normal
+                        apifyStartBtn.disabled = false;
+                        apifyStartBtn.textContent = '⚡ Lancer l\'import et l\'enrichissement';
+                        apifyStopBtn.style.display = 'none';
+                        apifyStopBtn.disabled = false;
+                        apifyStopBtn.textContent = 'Arrêter l\'import';
+                        _apifyBatchId = null;
+                    }
+                } catch (e) { console.error('Erreur polling apify:', e); }
+            }, 2500);
+        }
+
+        function apifyOnError(msg) {
+            if (_apifyPollTimer) { clearInterval(_apifyPollTimer); _apifyPollTimer = null; }
+            apifyProgressFill.style.width = '0%';
+            apifyProgress.classList.remove('visible');
+            apifyShowResult('error', `❌ Erreur : ${msg}`);
+            apifyStartBtn.disabled = false;
+            apifyStartBtn.textContent = '⚡ Lancer l\'import et l\'enrichissement';
+            apifyStopBtn.style.display = 'none';
+            apifyStopBtn.disabled = false;
+            apifyStopBtn.textContent = 'Arrêter l\'import';
+            _apifyBatchId = null;
+        }
+
+        function apifyShowResult(type, html) {
+            apifyResultEl.className = `apify-result visible ${type}`;
+            apifyResultEl.innerHTML = html;
+        }
+
+        function apifyShowStats(stats) {
+            if (!stats || stats.total === 0) return;
+            apifyStatsEl.classList.add('visible');
+            apifyStatsEl.innerHTML = `
+                <div class="statistics-section" style="margin-top:0;">
+                    <h4>📊 Résultats de l'import</h4>
+                    <div class="stats-grid">
+                        <div class="stat-item"><span class="stat-label">Total leads</span><span class="stat-value">${stats.total}</span></div>
+                        <div class="stat-item"><span class="stat-label">Avec email</span><span class="stat-value">${stats.withEmail}</span></div>
+                        <div class="stat-item"><span class="stat-label">Avec téléphone</span><span class="stat-value">${stats.withPhone}</span></div>
+                        <div class="stat-item"><span class="stat-label">Avec site web</span><span class="stat-value">${stats.withWebsite}</span></div>
+                        <div class="stat-item"><span class="stat-label">Avec LinkedIn</span><span class="stat-value">${stats.withLinkedIn}</span></div>
+                        <div class="stat-item"><span class="stat-label">Score moyen</span><span class="stat-value">${Math.round(stats.avgScore)}/100</span></div>
+                        <div class="stat-item"><span class="stat-label">Priorité A</span><span class="stat-value priority-a">${stats.priorityA}</span></div>
+                        <div class="stat-item"><span class="stat-label">Priorité B</span><span class="stat-value priority-b">${stats.priorityB}</span></div>
+                        <div class="stat-item"><span class="stat-label">Priorité C</span><span class="stat-value priority-c">${stats.priorityC}</span></div>
+                        <div class="stat-item"><span class="stat-label">Priorité D</span><span class="stat-value priority-d">${stats.priorityD}</span></div>
+                    </div>
+                </div>`;
+        }
+
+        // Synchroniser le badge HubSpot Apify avec le badge principal (déjà chargé)
+        (async () => {
+            const badge = document.getElementById('apifyHubspotBadge');
+            const cb    = document.getElementById('apifyDestHS');
+            const opt   = document.getElementById('apifyDestHSOption');
+            try {
+                const res  = await fetch('/scrape/check-hubspot');
+                const data = await res.json();
+                if (data.connected) {
+                    badge.className = 'dest-badge badge-active';
+                    badge.textContent = 'Connecté';
+                } else {
+                    badge.className = 'dest-badge badge-error';
+                    badge.textContent = 'Non configuré';
+                    cb.disabled = true; opt.style.opacity = '0.6';
+                }
+            } catch {
+                badge.className = 'dest-badge badge-disabled';
+                badge.textContent = 'Non configuré';
+                cb.disabled = true; opt.style.opacity = '0.6';
+            }
+        })();
     </script>
 </body>
 

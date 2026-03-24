@@ -375,7 +375,90 @@ class ScrapeController {
     }
   }
 
-  // ── MÉTHODE DE MONITORING ─────────────────────────────────────────
+  // ── IMPORT APIFY ─────────────────────────────────────────────────
+  /**
+   * POST /scrape/apify-import
+   * Body: { records: [...], destGoogleSheets, destHubSpot, sheetId? }
+   * Accepte le JSON brut Apify (tableau d'objets ou objet avec une propriété items/results).
+   */
+  async startApifyImport(req, res) {
+    let { records, destGoogleSheets = true, destHubSpot = false, sheetId = null } = req.body;
+
+    // Tolérance : si le JSON est un objet wrapper { items: [...] } ou { results: [...] }
+    if (records && !Array.isArray(records)) {
+      records = records.items || records.results || records.data || null;
+    }
+
+    if (!Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ error: 'Le champ "records" doit être un tableau non vide.' });
+    }
+    if (!destGoogleSheets && !destHubSpot) {
+      return res.status(400).json({ error: 'Veuillez sélectionner au moins une destination.' });
+    }
+    if (records.length > 5000) {
+      return res.status(400).json({ error: 'Maximum 5000 enregistrements par import.' });
+    }
+
+    const batchId    = uuidv4();
+    const userEmail  = req.session?.userEmail;
+    const startTime  = new Date();
+
+    // Créer le batch en base (même structure que startScraping)
+    await scrapingStore.createBatch(batchId, {
+      keyword:            `apify_import_${records.length}`,
+      sources:            ['apify_google_maps'],
+      departments:        [],
+      startTime,
+      enrichmentEnabled:  true,
+      n8nEnabled:         destGoogleSheets,
+      oneByOneProcessing: true,
+      destGoogleSheets,
+      destHubSpot,
+      crawlBatchId:       batchId,
+      sheetId,
+      userEmail
+    });
+
+    globalScrapingActive = true;
+
+    // Traitement asynchrone — ne bloque pas la réponse HTTP
+    (async () => {
+      try {
+        const results = await legacyScraper.processApifyData(records, {
+          enableN8nSending: destGoogleSheets,
+          enableHubSpot:    destHubSpot,
+          sheetId,
+          crawlBatchId:     batchId
+        });
+
+        const leads   = results.leads || [];
+        const updates = {
+          is_running:  false,
+          completed:   true,
+          leads_count: results.successful,
+          cancelled:   !!results.cancelled,
+          stats:       this.calculateStats(leads)
+        };
+        if (results.cancelled) updates.error = 'Import arrêté par l\'utilisateur';
+        if (sheetId) updates.spreadsheet_url = `https://docs.google.com/spreadsheets/d/${sheetId}/edit`;
+
+        await scrapingStore.updateBatch(batchId, updates);
+        console.log(`✅ Import Apify ${batchId} terminé: ${results.successful} leads`);
+
+      } catch (err) {
+        console.error(`❌ Import Apify ${batchId} erreur:`, err.message);
+        await scrapingStore.updateBatch(batchId, {
+          is_running: false, completed: true, error: err.message, cancelled: false
+        });
+      } finally {
+        globalScrapingActive = false;
+        const next = await scrapingStore.dequeueNext();
+        if (next) console.log(`📋 Prochain scraping prêt: ${next}`);
+      }
+    })();
+
+    return res.json({ success: true, message: 'Import Apify démarré en arrière-plan', batchId });
+  }
   async getMonitoringData(req, res) {
     try {
       const userEmail = req.session.userEmail;

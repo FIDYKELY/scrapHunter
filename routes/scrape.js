@@ -130,5 +130,8 @@ router.get('/monitoring-view', isAuthenticated, isAdmin, (req, res) => {
   res.render('monitoring', { user: { email: req.session.userEmail, role: req.session.userRole } });
 });
 
+// routes/scrape.js — ajouter cette ligne avec les autres routes POST
+router.post('/apify-import', scrapeController.startApifyImport.bind(scrapeController));
+
 module.exports = router;
 
