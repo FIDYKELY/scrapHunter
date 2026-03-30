@@ -129,6 +129,7 @@ function getDomainLimiter(domain) {
 const OVERPASS_SERVERS = [
   'https://overpass-api.de/api/interpreter',               // Allemagne (principal)
   'https://overpass.kumi.systems/api/interpreter',          // Canada (backup)
+  'https://overpass.openstreetmap.fr/api/interpreter',      // France (stable)
   'https://overpass.metrostationsystem.de/api/interpreter', // Allemagne (stable)
   'https://overpass.openstreetmap.ie/api/interpreter',      // Irlande
   'https://overpass.mirko.dev/api/interpreter'              // Allemagne (bon débit)
@@ -167,26 +168,54 @@ const DEPARTEMENTS_FRANCE = [
 
 // Mapping département → ville (format PagesJaunes, minuscules)
 const DEPT_VILLE_MAPPING = {
-  '01': 'bourg-en-bresse', '02': 'laon', '03': 'moulins', '04': 'digne', '05': 'gap',
-  '06': 'nice', '07': 'le-puy-en-velay', '08': 'charleville-mezieres', '09': 'foix', '10': 'troyes',
-  '11': 'carcassonne', '12': 'rodez', '13': 'marseille', '14': 'caen', '15': 'aurillac',
-  '16': 'angouleme', '17': 'la-rochelle', '18': 'bourges', '19': 'tulle', '2A': 'ajaccio',
-  '2B': 'bastia', '21': 'dijon', '22': 'saint-brieuc', '23': 'gueret', '24': 'perigueux',
-  '25': 'besancon', '26': 'valence', '27': 'evreux', '28': 'chartres', '29': 'quimper',
-  '30': 'nimes', '31': 'toulouse', '32': 'auch', '33': 'bordeaux', '34': 'montpellier',
-  '35': 'rennes', '36': 'chateauroux', '37': 'tours', '38': 'grenoble', '39': 'lons-le-saunier',
-  '40': 'mont-de-marsan', '41': 'blois', '42': 'saint-etienne', '43': 'le-puy-en-velay', '44': 'nantes',
-  '45': 'orleans', '46': 'cahors', '47': 'agen', '48': 'mende', '49': 'angers', '50': 'coutances',
-  '51': 'chalon-en-champagne', '52': 'chaumont', '53': 'laval', '54': 'nancy', '55': 'bar-le-duc',
-  '56': 'vannes', '57': 'metz', '58': 'nevers', '59': 'lille', '60': 'beauvais',
-  '61': 'alencon', '62': 'lens', '63': 'clermont-ferrand', '64': 'pau', '65': 'tarbes',
-  '66': 'perpignan', '67': 'strasbourg', '68': 'colmar', '69': 'lyon', '70': 'vesoul',
-  '71': 'macon', '72': 'le-mans', '73': 'chambery', '74': 'annecy', '75': 'paris',
-  '76': 'rouen', '77': 'melun', '78': 'versailles', '79': 'niort', '80': 'amiens',
-  '81': 'albi', '82': 'montauban', '83': 'toulon', '84': 'avignon', '85': 'la-roche-sur-yon',
-  '86': 'poitiers', '87': 'limoges', '88': 'epinal', '89': 'auxerre', '90': 'belfort',
-  '91': 'evry', '92': 'nanterre', '93': 'bobigny', '94': 'creteil', '95': 'cergy-pontoise',
-  '971': 'pointe-a-pitre', '972': 'fort-de-france', '973': 'cayenne', '974': 'saint-denis', '976': 'mamoudzou'
+   '01': 'Ain', '02': 'Aisne', '03': 'Allier', '04': 'Alpes-de-Haute-Provence', '05': 'Hautes-Alpes',
+  '06': 'Alpes-Maritimes', '07': 'Ardèche', '08': 'Ardennes', '09': 'Ariège', '10': 'Aube',
+  '11': 'Aude', '12': 'Aveyron', '13': 'Bouches-du-Rhône', '14': 'Calvados', '15': 'Cantal',
+  '16': 'Charente', '17': 'Charente-Maritime', '18': 'Cher', '19': 'Corrèze', '2A': 'Corse-du-Sud',
+  '2B': 'Haute-Corse', '21': 'Côte-d\'Or', '22': 'Côtes-d\'Armor', '23': 'Creuse', '24': 'Dordogne',
+  '25': 'Doubs', '26': 'Drôme', '27': 'Eure', '28': 'Eure-et-Loir', '29': 'Finistère',
+  '30': 'Gard', '31': 'Haute-Garonne', '32': 'Gers', '33': 'Gironde', '34': 'Hérault',
+  '35': 'Ille-et-Vilaine', '36': 'Indre', '37': 'Indre-et-Loire', '38': 'Isère', '39': 'Jura',
+  '40': 'Landes', '41': 'Loir-et-Cher', '42': 'Loire', '43': 'Haute-Loire', '44': 'Loire-Atlantique',
+  '45': 'Loiret', '46': 'Lot', '47': 'Lot-et-Garonne', '48': 'Lozère', '49': 'Maine-et-Loire',
+  '50': 'Manche', '51': 'Marne', '52': 'Haute-Marne', '53': 'Mayenne', '54': 'Meurthe-et-Moselle',
+  '55': 'Meuse', '56': 'Morbihan', '57': 'Moselle', '58': 'Nièvre', '59': 'Nord',
+  '60': 'Oise', '61': 'Orne', '62': 'Pas-de-Calais', '63': 'Puy-de-Dôme', '64': 'Pyrénées-Atlantiques',
+  '65': 'Hautes-Pyrénées', '66': 'Pyrénées-Orientales', '67': 'Bas-Rhin', '68': 'Haut-Rhin', '69': 'Rhône',
+  '70': 'Haute-Saône', '71': 'Saône-et-Loire', '72': 'Sarthe', '73': 'Savoie', '74': 'Haute-Savoie',
+  '75': 'Paris', '76': 'Seine-Maritime', '77': 'Seine-et-Marne', '78': 'Yvelines', '79': 'Deux-Sèvres',
+  '80': 'Somme', '81': 'Tarn', '82': 'Tarn-et-Garonne', '83': 'Var', '84': 'Vaucluse', '85': 'Vendée',
+  '86': 'Vienne', '87': 'Haute-Vienne', '88': 'Vosges', '89': 'Yonne', '90': 'Territoire de Belfort',
+  '91': 'Essonne', '92': 'Hauts-de-Seine', '93': 'Seine-Saint-Denis', '94': 'Val-de-Marne', '95': 'Val-d\'Oise',
+  '971': 'Guadeloupe', '972': 'Martinique', '973': 'Guyane', '974': 'La Réunion', '976': 'Mayotte'
+};
+// Mapping département → nom du département (pour l'URL PagesJaunes)
+const DEPT_NAME_MAPPING = {
+  '01': 'ain', '02': 'aisne', '03': 'allier', '04': 'alpes-de-haute-provence',
+  '05': 'hautes-alpes', '06': 'alpes-maritimes', '07': 'ardeche', '08': 'ardennes',
+  '09': 'ariege', '10': 'aube', '11': 'aude', '12': 'aveyron', '13': 'bouches-du-rhone',
+  '14': 'calvados', '15': 'cantal', '16': 'charente', '17': 'charente-maritime',
+  '18': 'cher', '19': 'correze', '2A': 'corse-du-sud', '2B': 'haute-corse',
+  '21': 'cote-d-or', '22': 'cotes-d-armor', '23': 'creuse', '24': 'dordogne',
+  '25': 'doubs', '26': 'drome', '27': 'eure', '28': 'eure-et-loir', '29': 'finistere',
+  '30': 'gard', '31': 'haute-garonne', '32': 'gers', '33': 'gironde', '34': 'herault',
+  '35': 'ille-et-vilaine', '36': 'indre', '37': 'indre-et-loire', '38': 'isere',
+  '39': 'jura', '40': 'landes', '41': 'loir-et-cher', '42': 'loire', '43': 'haute-loire',
+  '44': 'loire-atlantique', '45': 'loiret', '46': 'lot', '47': 'lot-et-garonne',
+  '48': 'lozere', '49': 'maine-et-loire', '50': 'manche', '51': 'marne',
+  '52': 'haute-marne', '53': 'mayenne', '54': 'meurthe-et-moselle', '55': 'meuse',
+  '56': 'morbihan', '57': 'moselle', '58': 'nievre', '59': 'nord', '60': 'oise',
+  '61': 'orne', '62': 'pas-de-calais', '63': 'puy-de-dome', '64': 'pyrenees-atlantiques',
+  '65': 'hautes-pyrenees', '66': 'pyrenees-orientales', '67': 'bas-rhin', '68': 'haut-rhin',
+  '69': 'rhone', '70': 'haute-saone', '71': 'saone-et-loire', '72': 'sarthe',
+  '73': 'savoie', '74': 'haute-savoie', '75': 'paris', '76': 'seine-maritime',
+  '77': 'seine-et-marne', '78': 'yvelines', '79': 'deux-sevres', '80': 'somme',
+  '81': 'tarn', '82': 'tarn-et-garonne', '83': 'var', '84': 'vaucluse', '85': 'vendee',
+  '86': 'vienne', '87': 'haute-vienne', '88': 'vosges', '89': 'yonne',
+  '90': 'territoire-de-belfort', '91': 'essonne', '92': 'hauts-de-seine',
+  '93': 'seine-saint-denis', '94': 'val-de-marne', '95': 'val-d-oise',
+  '971': 'guadeloupe', '972': 'martinique', '973': 'guyane', '974': 'la-reunion',
+  '976': 'mayotte'
 };
 
 // Bounding boxes des départements (format: sud,ouest,nord,est)
@@ -392,11 +421,33 @@ function getDepartmentBbox(dept) {
 }
 
 function buildOverpassQuery(bbox, searchKeywords) {
-  // Si aucun mot-clé personnalisé n'est fourni, on garde la liste immobilière historique
-  const list = (searchKeywords && searchKeywords.length > 0)
+   // Si aucun mot-clé personnalisé n'est fourni, on garde la liste immobilière historique
+  let list = (searchKeywords && searchKeywords.length > 0)
     ? searchKeywords
     : REAL_ESTATE_KEYWORDS;
-  const keywordsPattern = list.join('|');
+  
+  // Si list est un tableau avec un seul élément qui contient des espaces,
+  // on le transforme en plusieurs termes OR
+  let finalPattern;
+  if (Array.isArray(list) && list.length === 1 && typeof list[0] === 'string') {
+    // Diviser par les espaces, enlever les caractères indésirables
+    let raw = list[0];
+    // Remplacer les tirets par des espaces
+    raw = raw.replace(/-/g, ' ');
+    // Séparer en mots, filtrer les mots vides
+    const words = raw.split(/\s+/).filter(w => w.length > 0);
+    if (words.length > 1) {
+      // Construire un pattern OR avec tous les mots
+      finalPattern = words.join('|');
+    } else {
+      finalPattern = raw;
+    }
+  } else {
+    // Cas normal : un tableau de plusieurs termes (ou liste immobilière)
+    finalPattern = list.join('|');
+  }
+
+  const keywordsPattern = finalPattern;
 
   // Vérifier si la recherche concerne l'immobilier pour inclure les tags OSM par défaut
   let isRealEstate = (!searchKeywords || searchKeywords.length === 0);
@@ -453,9 +504,8 @@ function splitDepartmentBbox(bbox, maxSplits = 4) {
 async function executeOverpassQuery(query, serverIndex = 0, attempt = 0) {
   const server = OVERPASS_SERVERS[serverIndex];
   
-  // Si le serveur a échoué trop récemment, on le saute
   const lastFail = SERVER_FAILURES.get(server);
-  if (lastFail && Date.now() - lastFail < 300000) { // 5 minutes
+  if (lastFail && Date.now() - lastFail < 300000) {
     logWarning(`Serveur ${server} marqué comme défaillant récemment, passage au suivant`);
     return executeOverpassQuery(query, serverIndex + 1, 0);
   }
@@ -463,7 +513,7 @@ async function executeOverpassQuery(query, serverIndex = 0, attempt = 0) {
   await OSM_RATE_LIMITER.acquire('overpass-api');
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
 
   try {
     const response = await fetch(server, {
@@ -474,7 +524,6 @@ async function executeOverpassQuery(query, serverIndex = 0, attempt = 0) {
     });
     clearTimeout(timeoutId);
 
-    // Vérifier le Content-Type
     const contentType = response.headers.get('content-type') || '';
     if (contentType.includes('xml') || contentType.includes('html')) {
       const bodyText = await response.text();
@@ -482,17 +531,14 @@ async function executeOverpassQuery(query, serverIndex = 0, attempt = 0) {
     }
 
     if (!response.ok) {
-      // Gestion spécifique des codes d'erreur
       if (response.status === 429 || response.status === 503) {
         const retryAfter = response.headers.get('Retry-After');
         const wait = retryAfter ? parseInt(retryAfter) * 1000 : 60000;
         logWarning(`Rate limit ou surcharge (${response.status}) sur ${server}, attente ${wait}ms`);
         await new Promise(r => setTimeout(r, wait));
-        // Réessayer le même serveur
         return executeOverpassQuery(query, serverIndex, attempt + 1);
       }
       if (response.status === 403) {
-        // Interdit → probablement définitif, on passe au suivant
         SERVER_FAILURES.set(server, Date.now());
         throw new Error(`Forbidden (403) on ${server}`);
       }
@@ -508,34 +554,29 @@ async function executeOverpassQuery(query, serverIndex = 0, attempt = 0) {
   } catch (error) {
     clearTimeout(timeoutId);
 
-    // Log de l'erreur
     logWarning(`Erreur sur ${server}: ${error.message.substring(0, 80)}`);
 
-    // Décider si on peut basculer sur un autre serveur
     const canFallback = serverIndex < OVERPASS_SERVERS.length - 1 && (
       error.name === 'AbortError' ||
       error.code === 'ENOTFOUND' ||
       error.code === 'ECONNREFUSED' ||
       error.message.includes('timeout') ||
       error.message.includes('Non-JSON') ||
-      error.message.includes('HTTP 4') || // 403, 429, etc.
+      error.message.includes('HTTP 4') ||
       error.message.includes('HTTP 5')
     );
 
     if (canFallback) {
-      // Marquer le serveur comme défaillant pour éviter de le réutiliser trop vite
       SERVER_FAILURES.set(server, Date.now());
       logWarning(`Bascule vers ${OVERPASS_SERVERS[serverIndex + 1]}`);
       return executeOverpassQuery(query, serverIndex + 1, 0);
-    } else if (attempt < 2) {
-      // Réessai avec backoff exponentiel sur le même serveur
+    } else if (attempt < 2) { // Ici on peut passer à 2 (3 tentatives au total)
       const delay = 5000 * Math.pow(2, attempt);
       logWarning(`Nouvel essai sur ${server} (${attempt+1}/3) dans ${delay}ms`);
       await new Promise(r => setTimeout(r, delay));
       return executeOverpassQuery(query, serverIndex, attempt + 1);
     }
 
-    // Échec définitif
     logError(`Échec définitif pour la requête après ${attempt+1} tentatives`);
     throw error;
   }
@@ -951,8 +992,8 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
       else if (dept === '69') baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodedKeyword}&ou=lyon-69`;
       else if (dept === '13') baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodedKeyword}&ou=marseille-13`;
       else {
-        const city = DEPT_VILLE_MAPPING[dept] || dept.toLowerCase();
-        baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodedKeyword}&ou=${city}-${dept}`;
+        const deptName = DEPT_NAME_MAPPING[dept] || dept.toLowerCase();
+        baseUrl = `https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=${encodedKeyword}&ou=${deptName}-${dept}`;
       }
 
       let pageNum = 1;
@@ -1064,6 +1105,21 @@ async function scrapePagesJaunes(departments = [], crawlBatchId, options = {}) {
 // ─────────────────────────────────────────────
 // 2-ENRICHISSEMENT-SITE.JS
 // ─────────────────────────────────────────────
+function isValidEmail(email) {
+  if (!email) return false;
+  const lower = email.toLowerCase().trim();
+  // Ignorer les emails placeholder/invalides
+  const invalidPatterns = [
+    /^nom@exemple\.(com|fr)/,
+    /^test@test\.com/,
+    /^info@info\.com/,
+    /^contact@contact\.(com|fr)/,
+    /^example@example\.(com|org)/,
+    /^noreply@/
+  ];
+  return !invalidPatterns.some(pattern => pattern.test(lower));
+}
+
 function mergeEnrichmentData(target, source) {
   if (source.emails?.length) target.emails.push(...source.emails);
   if (source.contactPage && !target.contactPage) target.contactPage = source.contactPage;
@@ -1087,45 +1143,49 @@ async function scrapePageForContacts(url) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
     } catch (err) {
       if (err.message && err.message.includes('net::ERR_')) {
         logWarning(`Erreur réseau pour ${url}: ${err.message}`);
         await browser.close();
         return { emails: [], contactPage: null, contactForm: false, social: {}, phone: null, postalCode: null, city: null };
       }
-      throw err;
+      // Fallback à domcontentloaded si networkidle2 timeout
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      } catch (err2) {
+        logWarning(`Impossible de charger ${url}: ${err2.message}`);
+        await browser.close();
+        return { emails: [], contactPage: null, contactForm: false, social: {}, phone: null, postalCode: null, city: null };
+      }
     }
 
-    await new Promise(r => setTimeout(r, 1500));
+    // Attendre que le DOM se stabilise
+    try {
+      await page.waitForFunction(() => document.readyState === 'complete', { timeout: 10000 });
+    } catch (_) {
+      logWarning(`DOM n'a pas atteint 'complete' pour ${url}`);
+    }
+
+    await new Promise(r => setTimeout(r, 3000 + Math.random() * 2000));
 
     // --- Tenter de cliquer sur les boutons de révélation de téléphone ---
     try {
-      const phoneButtonSelectors = [
-        '.display-phone-number',
-        '[class*="phone"]',
-        'a[href*="tel"]:not([href^="tel:"])',
-        'button[class*="phone"]',
-        'a:has-text("Afficher")',
-        'button:has-text("Afficher")',
-        'a:has-text("Voir")',
-        'button:has-text("Voir")',
-        'a:has-text("téléphone")',      // ← ajout
-        'button:has-text("téléphone")',   // ← ajout
-        'a:has-text("numero")',
-        'button:has-text("numero")'
-      ];
-      for (const selector of phoneButtonSelectors) {
-        const button = await page.$(selector);
-        if (button) {
-          const text = await page.evaluate(el => el.textContent, button);
-          if (text && (text.toLowerCase().includes('afficher') || text.toLowerCase().includes('voir') || text.toLowerCase().includes('numero') || text.toLowerCase().includes('téléphone'))) {
-            await button.click({ delay: 100 });
-            logInfo(`📞 Bouton de téléphone cliqué sur ${url}`);
-            await new Promise(r => setTimeout(r, 2000)); // Attendre l'affichage
-            break;
-          }
+      const clicked = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('a, button'));
+        const target = buttons.find(el => {
+          const text = el.innerText.toLowerCase();
+          return text.includes('afficher') || text.includes('voir') || text.includes('numero') || text.includes('téléphone');
+        });
+        if (target) {
+          target.click();
+          return true;
         }
+        return false;
+      });
+      if (clicked) {
+        logInfo(`📞 Bouton de téléphone cliqué sur ${url}`);
+        await new Promise(r => setTimeout(r, 2000));
       }
     } catch (err) {
       logWarning(`Erreur lors du clic sur bouton téléphone: ${err.message}`);
@@ -1156,7 +1216,11 @@ async function scrapePageForContacts(url) {
       r.emails = r.emails.filter(email => {
         if (!validEmailRegex.test(email)) return false;
         const domain = email.split('@')[1];
-        return !invalidExtensions.some(ext => domain.toLowerCase().endsWith(ext));
+        if (invalidExtensions.some(ext => domain.toLowerCase().endsWith(ext))) return false;
+        // Filtrer les emails placeholder
+        const placeholders = ['nom@exemple', 'test@test', 'info@info', 'contact@contact', 'example@example', 'noreply@'];
+        if (placeholders.some(p => email.toLowerCase().includes(p))) return false;
+        return true;
       });
 
       // --- Téléphone ---
@@ -1236,7 +1300,14 @@ async function scrapePageForContacts(url) {
 async function enrichWebsite(lead) {
   if (!lead.site_web || lead.site_web === '#') return lead;
 
-  logInfo(`🔍 Enrichissement site web: ${lead.nom_entreprise}`);
+  // Verifier si l'email actuel du lead est invalide --> forcer enrichissement
+  const shouldForceEnrichment = lead.email && !isValidEmail(lead.email);
+  if (shouldForceEnrichment) {
+    logInfo(`Warning Email invalide detecte: ${lead.email} -- forcage de recherche sur le site web`);
+    lead.email = null; // Reinitialiser pour forcer la recherche
+  }
+
+  logInfo(`Recherche Enrichissement site web: ${lead.nom_entreprise}`);
   const site = lead.site_web.startsWith('http') ? lead.site_web : `https://${lead.site_web}`;
 
   try {
@@ -1251,12 +1322,12 @@ async function enrichWebsite(lead) {
       phone: null, postalCode: null, city: null
     };
 
-    // 1) Page d'accueil avec interaction (clic sur boutons téléphone)
+    // 1) Page d'accueil avec interaction (clic sur boutons telephone)
     let homeResult = null;
     try {
       homeResult = await scrapePageForContacts(site);
       mergeEnrichmentData(enrichment, homeResult);
-      logInfo(`🏠 Page d'accueil analysée: ${enrichment.emails.length} email(s), téléphone: ${enrichment.phone ? '✓' : '✗'}, CP: ${enrichment.postalCode || '✗'}`);
+      logInfo(`Accueil analyse: ${enrichment.emails.length} email(s), telephone: ${enrichment.phone ? 'OK' : 'NON'}, CP: ${enrichment.postalCode || 'NON'}`);
     } catch (err) { 
       logWarning(`Impossible d'ouvrir ${site}: ${err.message}`); 
     }
@@ -1356,14 +1427,19 @@ async function enrichWebsite(lead) {
       }
     }
 
-    // Dédupliquer les emails
+    // Deduplication et filtrage des emails
     enrichment.emails = Array.from(new Set(enrichment.emails));
+    enrichment.emails = enrichment.emails.filter(e => isValidEmail(e));
 
-    // Attribuer l'email au lead
+    // Attribuer l'email au lead (uniquement si valide)
     if (enrichment.emails.length > 0) {
       const direct = enrichment.emails.find(e => !/^(contact|info|admin|bonjour|hello|commercial)/i.test(e.split('@')[0]));
       lead.email = normalizeEmail(direct || enrichment.emails[0]);
-      logInfo(`✅ Email trouvé: ${lead.email}`);
+      logInfo(`Email valide trouve: ${lead.email}`);
+    } else if (lead.email && !isValidEmail(lead.email)) {
+      // Si l'email du lead est invalide et aucun email valide n'a ete trouve
+      logWarning(`Aucun email valide trouve pour ${lead.nom_entreprise} (ancien email invalide: ${lead.email})`);
+      lead.email = null;
     }
     
     // Autres enrichissements
@@ -1614,6 +1690,23 @@ function generateTestData(keyword, count = 5) {
 // ─────────────────────────────────────────────
 // PROCESSUS PRINCIPAL
 // ─────────────────────────────────────────────
+function updateDataQuality(lead) {
+  const missing = [];
+  if (!lead.telephone) missing.push('telephone');
+  if (!lead.email) missing.push('email');
+  if (!lead.site_web) missing.push('site_web');
+  lead.missing = missing;
+
+  if (lead.telephone && lead.email && lead.site_web) {
+    lead.data_quality = 'HIGH';
+  } else if (lead.telephone || lead.email || lead.site_web) {
+    lead.data_quality = 'MEDIUM';
+  } else {
+    lead.data_quality = 'LOW';
+  }
+  return lead;
+}
+
 /**
  * Traite un seul lead : enrichissement site → enrichissement social → enrichissement Google Maps → scoring → envoi n8n
  */
@@ -1674,6 +1767,7 @@ async function processLead(lead, options = {}) {
 
   // Étape 3 — Scoring
   lead = withUpdatedScore(lead);
+  lead = updateDataQuality(lead);
   
   // Debug : vérifier que les données Google Maps sont bien présentes AVANT le scoring
   logInfo(`🔍 DEBUG Scoring pour ${lead.nom_entreprise}`, {
@@ -1801,7 +1895,20 @@ async function mainProcess(keyword, sources, departments = [], options = {}) {
     rawLeads.forEach(l => { l.sheetId = sheetId; });
     logInfo(`📄 sheetId ${sheetId} ajouté à ${rawLeads.length} leads`);
   }
-  logInfo(`✅ ${rawLeads.length} leads bruts récupérés`);
+
+  // Déduplication des leads bruts
+  const uniqueLeads = new Map();
+  for (const lead of rawLeads) {
+    const key = lead.name_city_norm || lead.nom_entreprise;
+    if (!uniqueLeads.has(key)) {
+      uniqueLeads.set(key, lead);
+    } else {
+      logWarning(`Lead dupliqué ignoré: ${lead.nom_entreprise}`);
+    }
+  }
+  rawLeads = Array.from(uniqueLeads.values());
+
+  logInfo(`✅ ${rawLeads.length} leads bruts récupérés (après dédoublonnage)`);
 
   if (rawLeads.length === 0) {
     logWarning('Aucun lead trouvé, retour vide');
